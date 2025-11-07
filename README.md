@@ -174,6 +174,7 @@ kinesis-ondemand-demo/
 
 ### Prerequisites
 
+- Python 3.8+ installed
 - Docker and Docker Compose installed
 - **Non-production AWS account** with appropriate permissions
 - AWS credentials configured
@@ -199,23 +200,14 @@ cp .env.example .env
 # Update STREAM_NAME to your Kinesis stream name
 ```
 
-### 3. Create Kinesis Stream
+### 3. Deploy AWS CDK Stack (Required)
 
-**Standard On-Demand Stream:**
+For full production deployment:
+
 ```bash
-# Create stream if it doesn't exist
-aws kinesis create-stream \
-  --stream-name your-kinesis-stream-name \
-  --stream-mode-details StreamMode=ON_DEMAND
-```
-
-**With Warm Throughput (New Feature):**
-```bash
-# First enable On-Demand Advantage billing (one-time setup)
-./infrastructure/scripts/demo-manager.sh enable-advantage
-
-# Create stream with warm throughput using the demo manager
-./infrastructure/scripts/demo-manager.sh setup --warm-throughput 100
+cd infrastructure
+npm install
+./scripts/deploy.sh --environment production
 ```
 
 ### 4. Run the Demo
@@ -250,15 +242,7 @@ docker-compose logs -f
 ./build.sh run
 ```
 
-### 5. Deploy Infrastructure (Optional)
 
-For full production deployment:
-
-```bash
-cd infrastructure
-npm install
-./scripts/deploy.sh --environment production
-```
 
 ## Demo Manager Script
 
