@@ -1,0 +1,100 @@
+version: '3.8'
+
+services:
+  kinesis-data-generator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: kinesis-demo-generator
+    env_file:
+      - .env  # Load environment variables from .env file
+    environment:
+      # AWS configuration (can be overridden by .env file)
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN:-}
+      
+      # Demo configuration (can be overridden by .env file)
+      - STREAM_NAME=${STREAM_NAME:-social-media-stream}
+
+      - PER_TASK_CAPACITY=${PER_TASK_CAPACITY:-1000}
+      - MAX_TASKS=${MAX_TASKS:-100}
+      
+      # Container configuration
+      - PYTHONUNBUFFERED=${PYTHONUNBUFFERED:-1}
+      - PYTHONDONTWRITEBYTECODE=${PYTHONDONTWRITEBYTECODE:-1}
+      
+      # Container-specific metrics configuration
+      - CLOUDWATCH_NAMESPACE=${CLOUDWATCH_NAMESPACE:-KinesisOnDemandDemo}
+      - SERVICE_NAME=${SERVICE_NAME:-kinesis-data-generator}
+      - CLUSTER_NAME=${CLUSTER_NAME:-kinesis-demo-local}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DEPLOYMENT_ID=${DEPLOYMENT_ID:-docker-compose}
+      - CONTAINER_ID=${CONTAINER_ID:-local-generator-1}
+      - METRICS_PUBLISH_INTERVAL=${METRICS_PUBLISH_INTERVAL:-10}
+      - ENABLE_CLOUDWATCH_METRICS=${ENABLE_CLOUDWATCH_METRICS:-true}
+      
+      # Controller mode configuration (internal for local development)
+      - CONTROLLER_MODE=${CONTROLLER_MODE:-internal}
+      - PARAMETER_PREFIX=${PARAMETER_PREFIX:-/kinesis-demo}
+      
+      # Logging configuration
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    
+    volumes:
+      # Mount logs directory for debugging
+      - ./logs:/app/logs
+      
+      # Mount AWS credentials if using file-based auth
+      - ~/.aws:/home/appuser/.aws:ro
+    
+    # Resource limits for container
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: LocalStack for local AWS services testing
+  localstack:
+    image: localstack/localstack:latest
+    container_name: kinesis-demo-localstack
+    environment:
+      - SERVICES=kinesis,cloudwatch,logs
+      - DEBUG=1
+      - DATA_DIR=/tmp/localstack/data
+      - DOCKER_HOST=unix:///var/run/docker.sock
+    ports:
+      - "4566:4566"
+    volumes:
+      - "/tmp/localstack:/tmp/localstack"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    profiles:
+      - local-testing
+
+networks:
+  default:
+    name: kinesis-demo-network

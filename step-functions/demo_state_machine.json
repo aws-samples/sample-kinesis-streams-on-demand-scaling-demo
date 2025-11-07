@@ -1,0 +1,256 @@
+{
+  "Comment": "Kinesis On-Demand Demo State Machine - Manages 4-phase demo with ECS scaling",
+  "StartAt": "InitializeDemo",
+  "States": {
+    "InitializeDemo": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${DemoControllerFunctionArn}",
+        "Payload": {
+          "operation": "initialize_demo",
+          "demo_config": {
+            "phases": [
+              {"phase_number": 1, "target_tps": 1000, "duration_seconds": 120},
+              {"phase_number": 2, "target_tps": 100000, "duration_seconds": 1200},
+              {"phase_number": 3, "target_tps": 500000, "duration_seconds": 1200},
+              {"phase_number": 4, "target_tps": 1000, "duration_seconds": 120}
+            ]
+          }
+        }
+      },
+      "ResultPath": "$.demo_state",
+      "Next": "StartPhase1",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "DemoFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+
+    "StartPhase1": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${DemoControllerFunctionArn}",
+        "Payload": {
+          "operation": "start_phase",
+          "phase_number": 1,
+          "demo_state.$": "$.demo_state"
+        }
+      },
+      "ResultPath": "$.phase1_result",
+      "Next": "WaitPhase1Duration",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "DemoFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+
+    "WaitPhase1Duration": {
+      "Type": "Wait",
+      "Seconds": 120,
+      "Comment": "Wait for Phase 1 duration (2 minutes)",
+      "Next": "StartPhase2"
+    },
+
+    "StartPhase2": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${DemoControllerFunctionArn}",
+        "Payload": {
+          "operation": "start_phase",
+          "phase_number": 2,
+          "demo_state.$": "$.demo_state"
+        }
+      },
+      "ResultPath": "$.phase2_result",
+      "Next": "WaitPhase2Duration",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "DemoFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+
+    "WaitPhase2Duration": {
+      "Type": "Wait",
+      "Seconds": 1200,
+      "Comment": "Wait for Phase 2 duration (20 minutes)",
+      "Next": "StartPhase3"
+    },
+
+    "StartPhase3": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${DemoControllerFunctionArn}",
+        "Payload": {
+          "operation": "start_phase",
+          "phase_number": 3,
+          "demo_state.$": "$.demo_state"
+        }
+      },
+      "ResultPath": "$.phase3_result",
+      "Next": "WaitPhase3Duration",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "DemoFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+
+    "WaitPhase3Duration": {
+      "Type": "Wait",
+      "Seconds": 1200,
+      "Comment": "Wait for Phase 3 duration (20 minutes)",
+      "Next": "StartPhase4"
+    },
+
+    "StartPhase4": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${DemoControllerFunctionArn}",
+        "Payload": {
+          "operation": "start_phase",
+          "phase_number": 4,
+          "demo_state.$": "$.demo_state"
+        }
+      },
+      "ResultPath": "$.phase4_result",
+      "Next": "WaitPhase4Duration",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "DemoFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+
+    "WaitPhase4Duration": {
+      "Type": "Wait",
+      "Seconds": 120,
+      "Comment": "Wait for Phase 4 duration (2 minutes)",
+      "Next": "CleanupDemo"
+    },
+
+    "CleanupDemo": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${DemoControllerFunctionArn}",
+        "Payload": {
+          "operation": "cleanup_demo",
+          "demo_state.$": "$.demo_state"
+        }
+      },
+      "ResultPath": "$.cleanup_result",
+      "Next": "DemoCompleted",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "DemoFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+
+    "DemoCompleted": {
+      "Type": "Pass",
+      "Result": {
+        "status": "completed",
+        "message": "Kinesis On-Demand Demo completed successfully"
+      },
+      "End": true
+    },
+
+    "DemoFailed": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${DemoControllerFunctionArn}",
+        "Payload": {
+          "operation": "handle_failure",
+          "error.$": "$.error",
+          "demo_state.$": "$.demo_state"
+        }
+      },
+      "ResultPath": "$.failure_cleanup",
+      "Next": "FailureEnd",
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 2,
+          "BackoffRate": 2.0
+        }
+      ]
+    },
+
+    "FailureEnd": {
+      "Type": "Fail",
+      "Cause": "Demo execution failed",
+      "Error": "DemoExecutionError"
+    }
+  }
+}
