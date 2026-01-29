@@ -1,0 +1,84 @@
+{
+  "Records": [
+    {
+      "kinesis": {
+        "kinesisSchemaVersion": "1.0",
+        "partitionKey": "user_a1b2c3d4",
+        "sequenceNumber": "49590338271490256608559692538361571095921575989136588898",
+        "data": "eyJpZCI6ICJwb3N0XzEyMzQ1Njc4IiwgInRpbWVzdGFtcCI6ICIyMDI1LTAxLTI5VDEyOjMwOjAwLjAwMDAwMFoiLCAidXNlcl9pZCI6ICJ1c2VyX2ExYjJjM2Q0IiwgInVzZXJuYW1lIjogInRlY2hfZW50aHVzaWFzdDIwMjQiLCAiY29udGVudCI6ICJKdXN0IHRyaWVkIHRoZSBuZXcgQVdTIEtpbmVzaXMgT24tRGVtYW5kIGZlYXR1cmUgYW5kIGl0J3MgYW1hemluZyEg8J+agCBObyBtb3JlIHdvcnJ5aW5nIGFib3V0IHNoYXJkIG1hbmFnZW1lbnQuIEhpZ2hseSByZWNvbW1lbmQhICNBV1MgI0tpbmVzaXMgI0Nsb3VkQ29tcHV0aW5nIiwgImhhc2h0YWdzIjogWyJBV1MiLCAiS2luZXNpcyIsICJDbG91ZENvbXB1dGluZyJdLCAibWVudGlvbnMiOiBbXSwgImxvY2F0aW9uIjogeyJsYXRpdHVkZSI6IDM3Ljc3NDksICJsb25naXR1ZGUiOiAtMTIyLjQxOTQsICJjaXR5IjogIlNhbiBGcmFuY2lzY28iLCAiY291bnRyeSI6ICJVU0EifSwgImVuZ2FnZW1lbnRfc2NvcmUiOiA4LjUsICJwb3N0X3R5cGUiOiAib3JpZ2luYWwifQ==",
+        "approximateArrivalTimestamp": 1738155000.0
+      },
+      "eventSource": "aws:kinesis",
+      "eventVersion": "1.0",
+      "eventID": "shardId-000000000000:49590338271490256608559692538361571095921575989136588898",
+      "eventName": "aws:kinesis:record",
+      "invokeIdentityArn": "arn:aws:iam::956759611117:role/KinesisDemo-SentimentConsumerRole-production",
+      "awsRegion": "us-east-1",
+      "eventSourceARN": "arn:aws:kinesis:us-east-1:956759611117:stream/social-media-stream-production"
+    },
+    {
+      "kinesis": {
+        "kinesisSchemaVersion": "1.0",
+        "partitionKey": "user_e5f6g7h8",
+        "sequenceNumber": "49590338271490256608559692538362780021741190618311294994",
+        "data": "eyJpZCI6ICJwb3N0Xzg3NjU0MzIxIiwgInRpbWVzdGFtcCI6ICIyMDI1LTAxLTI5VDEyOjMxOjAwLjAwMDAwMFoiLCAidXNlcl9pZCI6ICJ1c2VyX2U1ZjZnN2g4IiwgInVzZXJuYW1lIjogImRldm9wc19ndXJ1IiwgImNvbnRlbnQiOiAiV2FybmluZzogRXhwZXJpZW5jaW5nIGhpZ2ggbGF0ZW5jeSB3aXRoIG91ciBkYXRhIHBpcGVsaW5lIHRvZGF5LiDwn5qoIE5vdCBzdXJlIGlmIGl0J3MgYSBLaW5lc2lzIGlzc3VlIG9yIG91ciBjb25zdW1lciBhcHAuIE5lZWQgdG8gaW52ZXN0aWdhdGUuICNEZXZPcHMgI1Byb2R1Y3Rpb25Jc3N1ZXMiLCAiaGFzaHRhZ3MiOiBbIkRldk9wcyIsICJQcm9kdWN0aW9uSXNzdWVzIl0sICJtZW50aW9ucyI6IFtdLCAibG9jYXRpb24iOiB7ImxhdGl0dWRlIjogNTEuNTA3NCwgImxvbmdpdHVkZSI6IC0wLjEyNzgsICJjaXR5IjogIkxvbmRvbiIsICJjb3VudHJ5IjogIlVLIn0sICJlbmdhZ2VtZW50X3Njb3JlIjogMy4yLCAicG9zdF90eXBlIjogIm9yaWdpbmFsIn0=",
+        "approximateArrivalTimestamp": 1738155060.0
+      },
+      "eventSource": "aws:kinesis",
+      "eventVersion": "1.0",
+      "eventID": "shardId-000000000001:49590338271490256608559692538362780021741190618311294994",
+      "eventName": "aws:kinesis:record",
+      "invokeIdentityArn": "arn:aws:iam::956759611117:role/KinesisDemo-SentimentConsumerRole-production",
+      "awsRegion": "us-east-1",
+      "eventSourceARN": "arn:aws:kinesis:us-east-1:956759611117:stream/social-media-stream-production"
+    },
+    {
+      "kinesis": {
+        "kinesisSchemaVersion": "1.0",
+        "partitionKey": "user_i9j0k1l2",
+        "sequenceNumber": "49590338271490256608559692538363988947560805247485901090",
+        "data": "eyJpZCI6ICJwb3N0XzExMjIzMzQ0IiwgInRpbWVzdGFtcCI6ICIyMDI1LTAxLTI5VDEyOjMyOjAwLjAwMDAwMFoiLCAidXNlcl9pZCI6ICJ1c2VyX2k5ajBrMWwyIiwgInVzZXJuYW1lIjogImNsb3VkX2FyY2hpdGVjdCIsICJjb250ZW50IjogIkxvdmluZyB0aGUgbmV3IEFtYXpvbiBCZWRyb2NrIE5vdmEgTWljcm8gbW9kZWwhIPCfmIAgU3VwZXIgZmFzdCBhbmQgY29zdC1lZmZlY3RpdmUgZm9yIHNlbnRpbWVudCBhbmFseXNpcy4gUGVyZmVjdCBmb3Igb3VyIHJlYWwtdGltZSBhbmFseXRpY3MgcGlwZWxpbmUuICNBSU1MICNCZWRyb2NrICNTZXJ2ZXJsZXNzIiwgImhhc2h0YWdzIjogWyJBSU1MIiwgIkJlZHJvY2siLCAiU2VydmVybGVzcyJdLCAibWVudGlvbnMiOiBbIkBhd3MiXSwgImxvY2F0aW9uIjogeyJsYXRpdHVkZSI6IDQwLjcxMjgsICJsb25naXR1ZGUiOiAtNzQuMDA2MCwgImNpdHkiOiAiTmV3IFlvcmsiLCAiY291bnRyeSI6ICJVU0EifSwgImVuZ2FnZW1lbnRfc2NvcmUiOiA5LjcsICJwb3N0X3R5cGUiOiAib3JpZ2luYWwifQ==",
+        "approximateArrivalTimestamp": 1738155120.0
+      },
+      "eventSource": "aws:kinesis",
+      "eventVersion": "1.0",
+      "eventID": "shardId-000000000002:49590338271490256608559692538363988947560805247485901090",
+      "eventName": "aws:kinesis:record",
+      "invokeIdentityArn": "arn:aws:iam::956759611117:role/KinesisDemo-SentimentConsumerRole-production",
+      "awsRegion": "us-east-1",
+      "eventSourceARN": "arn:aws:kinesis:us-east-1:956759611117:stream/social-media-stream-production"
+    },
+    {
+      "kinesis": {
+        "kinesisSchemaVersion": "1.0",
+        "partitionKey": "user_m3n4o5p6",
+        "sequenceNumber": "49590338271490256608559692538365197873380419876660507186",
+        "data": "eyJpZCI6ICJwb3N0XzU1NjY3Nzg4IiwgInRpbWVzdGFtcCI6ICIyMDI1LTAxLTI5VDEyOjMzOjAwLjAwMDAwMFoiLCAidXNlcl9pZCI6ICJ1c2VyX20zbjRvNXA2IiwgInVzZXJuYW1lIjogImRhdGFfc2NpZW50aXN0XzIwMjUiLCAiY29udGVudCI6ICJCdWlsZGluZyBhIHJlYWwtdGltZSBzZW50aW1lbnQgYW5hbHlzaXMgZGFzaGJvYXJkIHVzaW5nIEtpbmVzaXMgKyBMYW1iZGEgKyBCZWRyb2NrLiBUaGUgcmVzdWx0cyBhcmUgaW5jcmVkaWJsZSEg8J+TiCBQcm9jZXNzaW5nIDEwMEsgbWVzc2FnZXMvcyB3aXRoIGVhc2UuICNEYXRhU2NpZW5jZSAjUmVhbFRpbWVBbmFseXRpY3MgI0FXUyIsICJoYXNodGFncyI6IFsiRGF0YVNjaWVuY2UiLCAiUmVhbFRpbWVBbmFseXRpY3MiLCAiQVdTIl0sICJtZW50aW9ucyI6IFtdLCAibG9jYXRpb24iOiB7ImxhdGl0dWRlIjogLTMzLjg2ODgsICJsb25naXR1ZGUiOiAxNTEuMjA5MywgImNpdHkiOiAiU3lkbmV5IiwgImNvdW50cnkiOiAiQXVzdHJhbGlhIn0sICJlbmdhZ2VtZW50X3Njb3JlIjogNy4zLCAicG9zdF90eXBlIjogIm9yaWdpbmFsIn0=",
+        "approximateArrivalTimestamp": 1738155180.0
+      },
+      "eventSource": "aws:kinesis",
+      "eventVersion": "1.0",
+      "eventID": "shardId-000000000003:49590338271490256608559692538365197873380419876660507186",
+      "eventName": "aws:kinesis:record",
+      "invokeIdentityArn": "arn:aws:iam::956759611117:role/KinesisDemo-SentimentConsumerRole-production",
+      "awsRegion": "us-east-1",
+      "eventSourceARN": "arn:aws:kinesis:us-east-1:956759611117:stream/social-media-stream-production"
+    },
+    {
+      "kinesis": {
+        "kinesisSchemaVersion": "1.0",
+        "partitionKey": "user_q7r8s9t0",
+        "sequenceNumber": "49590338271490256608559692538366406799200034505835113282",
+        "data": "eyJpZCI6ICJwb3N0Xzk5ODg3NzY2IiwgInRpbWVzdGFtcCI6ICIyMDI1LTAxLTI5VDEyOjM0OjAwLjAwMDAwMFoiLCAidXNlcl9pZCI6ICJ1c2VyX3E3cjhzOXQwIiwgInVzZXJuYW1lIjogInN0YXJ0dXBfZm91bmRlciIsICJjb250ZW50IjogIk91ciBzdGFydHVwIGp1c3Qgc2F2ZWQgNDAlIG9uIGluZnJhIGNvc3RzIGJ5IHN3aXRjaGluZyB0byBLaW5lc2lzIE9uLURlbWFuZC4g8J+SsCBObyBtb3JlIG92ZXItcHJvdmlzaW9uaW5nISBHYW1lIGNoYW5nZXIgZm9yIGJvb3RzdHJhcHBlZCBzdGFydHVwcy4gI1N0YXJ0dXBMaWZlICNDb3N0T3B0aW1pemF0aW9uICNBV1MiLCAiaGFzaHRhZ3MiOiBbIlN0YXJ0dXBMaWZlIiwgIkNvc3RPcHRpbWl6YXRpb24iLCAiQVdTIl0sICJtZW50aW9ucyI6IFtdLCAibG9jYXRpb24iOiB7ImxhdGl0dWRlIjogMzcuMzM4MiwgImxvbmdpdHVkZSI6IC0xMjEuODg2MywgImNpdHkiOiAiU2FuIEpvc2UiLCAiY291bnRyeSI6ICJVU0EifSwgImVuZ2FnZW1lbnRfc2NvcmUiOiA2LjgsICJwb3N0X3R5cGUiOiAib3JpZ2luYWwifQ==",
+        "approximateArrivalTimestamp": 1738155240.0
+      },
+      "eventSource": "aws:kinesis",
+      "eventVersion": "1.0",
+      "eventID": "shardId-000000000004:49590338271490256608559692538366406799200034505835113282",
+      "eventName": "aws:kinesis:record",
+      "invokeIdentityArn": "arn:aws:iam::956759611117:role/KinesisDemo-SentimentConsumerRole-production",
+      "awsRegion": "us-east-1",
+      "eventSourceARN": "arn:aws:kinesis:us-east-1:956759611117:stream/social-media-stream-production"
+    }
+  ]
+}

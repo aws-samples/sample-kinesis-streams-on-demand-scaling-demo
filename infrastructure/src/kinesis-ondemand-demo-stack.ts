@@ -56,6 +56,9 @@ export class KinesisOnDemandDemoStack extends cdk.Stack {
 
 
 
+    // Create Sentiment Analysis Consumer Lambda
+    const sentimentConsumerFunction = this.createSentimentAnalysisConsumer(environment);
+
     // Create CloudWatch Dashboard
     this.dashboard = this.createCloudWatchDashboard(environment);
 
@@ -63,7 +66,7 @@ export class KinesisOnDemandDemoStack extends cdk.Stack {
     this.createLogGroups(environment);
 
     // Output important resource information
-    this.createOutputs(environment);
+    this.createOutputs(environment, sentimentConsumerFunction);
 
     // Apply security suppressions
     addSecuritySuppressions(this);
@@ -714,6 +717,209 @@ def lambda_handler(event, context):
     return { controllerFunction, stateMachine };
   }
 
+  private createSentimentAnalysisConsumer(environment: string): lambda.Function {
+    // Create Lambda Layer for dependencies (boto3, orjson)
+    const dependenciesLayer = new lambda.LayerVersion(this, 'SentimentConsumerDependenciesLayer', {
+      layerVersionName: `sentiment-consumer-dependencies-${environment}`,
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../lambda/sentiment-consumer/layer'), {
+        bundling: {
+          image: lambda.Runtime.PYTHON_3_12.bundlingImage,
+          command: [
+            'bash', '-c',
+            'pip install -r requirements.txt -t /asset-output/python && ' +
+            'rm -rf /asset-output/python/*.dist-info /asset-output/python/__pycache__'
+          ],
+        },
+      }),
+      compatibleRuntimes: [lambda.Runtime.PYTHON_3_12],
+      description: 'Dependencies for Sentiment Analysis Consumer (boto3, orjson)',
+    });
+
+    // Create Lambda execution role with required permissions
+    const sentimentConsumerRole = new iam.Role(this, 'SentimentConsumerRole', {
+      roleName: `KinesisDemo-SentimentConsumerRole-${environment}`,
+      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+      managedPolicies: [
+        iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+      ],
+      inlinePolicies: {
+        KinesisStreamAccess: new iam.PolicyDocument({
+          statements: [
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: [
+                'kinesis:GetRecords',
+                'kinesis:GetShardIterator',
+                'kinesis:DescribeStream',
+                'kinesis:DescribeStreamSummary',
+                'kinesis:ListShards',
+              ],
+              resources: [
+                `arn:aws:kinesis:${this.region}:${this.account}:stream/social-media-stream-${environment}`
+              ],
+            }),
+          ],
+        }),
+        BedrockAccess: new iam.PolicyDocument({
+          statements: [
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: [
+                'bedrock:InvokeModel',
+              ],
+              resources: [
+                `arn:aws:bedrock:${this.region}::foundation-model/amazon.nova-micro-v1:0`
+              ],
+            }),
+          ],
+        }),
+        CloudWatchLogsAccess: new iam.PolicyDocument({
+          statements: [
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: [
+                'logs:CreateLogStream',
+                'logs:PutLogEvents',
+              ],
+              resources: [
+                `arn:aws:logs:${this.region}:${this.account}:log-group:/aws/lambda/sentiment-analysis-consumer-${environment}:*`,
+                `arn:aws:logs:${this.region}:${this.account}:log-group:/aws/lambda/sentiment-analysis-consumer-${environment}/insights:*`
+              ],
+            }),
+          ],
+        }),
+        CloudWatchMetrics: new iam.PolicyDocument({
+          statements: [
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: ['cloudwatch:PutMetricData'],
+              resources: ['*'],
+              conditions: {
+                StringLike: {
+                  'cloudwatch:namespace': ['SentimentAnalysis/*'],
+                },
+              },
+            }),
+          ],
+        }),
+      },
+    });
+
+    // Create Lambda function with inline code deployment
+    // CDK will automatically bundle the Lambda code and shared utilities
+    const sentimentConsumerFunction = new lambda.Function(this, 'SentimentConsumerFunction', {
+      functionName: `sentiment-analysis-consumer-${environment}`,
+      runtime: lambda.Runtime.PYTHON_3_12,
+      handler: 'lambda_handler.handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../'), {
+        bundling: {
+          image: lambda.Runtime.PYTHON_3_12.bundlingImage,
+          command: [
+            'bash', '-c',
+            // Copy all Lambda function code
+            // Note: Lambda has its own models.py and serialization.py for Lambda-specific types
+            'mkdir -p /asset-output && ' +
+            'cp -r /asset-input/lambda/sentiment-consumer/*.py /asset-output/ && ' +
+            'cp -r /asset-input/lambda/sentiment-consumer/extractors /asset-output/ && ' +
+            // Copy shared utilities from project root to shared directory
+            // These are for SocialMediaPost and related types
+            'mkdir -p /asset-output/shared && ' +
+            'cp /asset-input/shared/models.py /asset-output/shared/ && ' +
+            'cp /asset-input/shared/serialization.py /asset-output/shared/ && ' +
+            // Create a minimal __init__.py for shared module (without config import)
+            'echo "# Shared utilities for Lambda" > /asset-output/shared/__init__.py && ' +
+            'echo "from .models import SocialMediaPost, KinesisRecord, DemoMetrics, GeoLocation, PostType" >> /asset-output/shared/__init__.py && ' +
+            'echo "from .serialization import serialize_to_json, deserialize_from_json, post_from_bytes" >> /asset-output/shared/__init__.py && ' +
+            // Clean up unnecessary files
+            'rm -rf /asset-output/layer /asset-output/build /asset-output/dist /asset-output/__pycache__ /asset-output/*/__pycache__ && ' +
+            'rm -f /asset-output/package.sh /asset-output/requirements.txt /asset-output/.gitignore /asset-output/*.md /asset-output/*.zip && ' +
+            // List contents for verification
+            'echo "=== Lambda package structure ===" && ' +
+            'ls -la /asset-output/ | head -20'
+          ],
+        },
+        exclude: [
+          'infrastructure/**',
+          '.git/**',
+          'lambda/sentiment-consumer/layer/**',
+          'lambda/sentiment-consumer/build/**',
+          'lambda/sentiment-consumer/dist/**',
+          '__pycache__/**',
+          '**/__pycache__/**',
+          '*.pyc',
+          'package.sh',
+          '.gitignore',
+          '*.md',
+          '*.zip',
+        ],
+      }),
+      layers: [dependenciesLayer],
+      timeout: cdk.Duration.minutes(5),
+      memorySize: 1024,
+      environment: {
+        BEDROCK_MODEL_ID: 'amazon.nova-micro-v1:0',
+        BEDROCK_REGION: this.region,
+        LOG_GROUP_NAME: `/aws/lambda/sentiment-analysis-consumer-${environment}`,
+        INSIGHTS_LOG_GROUP_NAME: `/aws/lambda/sentiment-analysis-consumer-${environment}/insights`,
+        ENVIRONMENT: environment,
+      },
+      role: sentimentConsumerRole,
+      description: 'Sentiment Analysis Consumer - Processes social media posts from Kinesis using Bedrock Nova Micro',
+    });
+
+    // Configure Event Source Mapping
+    sentimentConsumerFunction.addEventSourceMapping('KinesisEventSource', {
+      eventSourceArn: `arn:aws:kinesis:${this.region}:${this.account}:stream/social-media-stream-${environment}`,
+      batchSize: 150,
+      maxBatchingWindow: cdk.Duration.seconds(5),
+      startingPosition: lambda.StartingPosition.LATEST,
+      reportBatchItemFailures: true,
+      parallelizationFactor: 1,
+    });
+
+    // Create CloudWatch Log Groups
+    this.createSentimentAnalysisLogGroups(environment);
+
+    // Add resource tags
+    cdk.Tags.of(sentimentConsumerFunction).add('Environment', environment);
+    cdk.Tags.of(sentimentConsumerFunction).add('Component', 'SentimentAnalysisConsumer');
+    cdk.Tags.of(sentimentConsumerFunction).add('CostCenter', 'KinesisOnDemandDemo');
+    cdk.Tags.of(dependenciesLayer).add('Environment', environment);
+    cdk.Tags.of(dependenciesLayer).add('Component', 'SentimentAnalysisConsumer');
+
+    return sentimentConsumerFunction;
+  }
+
+  private createSentimentAnalysisLogGroups(environment: string) {
+    // Main Lambda log group
+    new logs.LogGroup(this, 'SentimentConsumerLogGroup', {
+      logGroupName: `/aws/lambda/sentiment-analysis-consumer-${environment}`,
+      retention: logs.RetentionDays.ONE_WEEK,
+    });
+
+    // Insight log streams
+    const insightLogGroup = new logs.LogGroup(this, 'SentimentInsightsLogGroup', {
+      logGroupName: `/aws/lambda/sentiment-analysis-consumer-${environment}/insights`,
+      retention: logs.RetentionDays.ONE_WEEK,
+    });
+
+    // Create log streams
+    const logStreams = [
+      'product-sentiment',
+      'trending-topics',
+      'engagement-sentiment',
+      'geographic-sentiment',
+      'viral-events',
+    ];
+
+    logStreams.forEach(streamName => {
+      new logs.LogStream(this, `${streamName}LogStream`, {
+        logGroup: insightLogGroup,
+        logStreamName: streamName,
+      });
+    });
+  }
+
 
 
   private createCloudWatchDashboard(environment: string): cloudwatch.CfnDashboard {
@@ -975,7 +1181,7 @@ def lambda_handler(event, context):
     // Step Functions log group (created in Step Functions resources)
   }
 
-  private createOutputs(environment: string) {
+  private createOutputs(environment: string, sentimentConsumerFunction?: lambda.Function) {
     new cdk.CfnOutput(this, 'KinesisStreamName', {
       value: `social-media-stream-${environment}`,
       description: 'Name of the Kinesis Data Stream (created by demo-manager.sh)',
@@ -1000,7 +1206,26 @@ def lambda_handler(event, context):
       exportName: `${this.stackName}-StateMachineArn`,
     });
 
+    // Sentiment Analysis Consumer outputs
+    if (sentimentConsumerFunction) {
+      new cdk.CfnOutput(this, 'SentimentConsumerFunctionArn', {
+        value: sentimentConsumerFunction.functionArn,
+        description: 'ARN of the Sentiment Analysis Consumer Lambda function',
+        exportName: `${this.stackName}-SentimentConsumerFunctionArn`,
+      });
 
+      new cdk.CfnOutput(this, 'SentimentConsumerLogGroupName', {
+        value: `/aws/lambda/sentiment-analysis-consumer-${environment}`,
+        description: 'CloudWatch Log Group for Sentiment Analysis Consumer',
+        exportName: `${this.stackName}-SentimentConsumerLogGroupName`,
+      });
+
+      new cdk.CfnOutput(this, 'SentimentInsightsLogGroupName', {
+        value: `/aws/lambda/sentiment-analysis-consumer-${environment}/insights`,
+        description: 'CloudWatch Log Group for Sentiment Insights',
+        exportName: `${this.stackName}-SentimentInsightsLogGroupName`,
+      });
+    }
 
     new cdk.CfnOutput(this, 'DashboardUrl', {
       value: `https://${this.region}.console.aws.amazon.com/cloudwatch/home?region=${this.region}#dashboards:name=${this.dashboard.dashboardName}`,
