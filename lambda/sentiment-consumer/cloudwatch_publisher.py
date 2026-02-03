@@ -1,66 +1,23 @@
 """
 CloudWatch Publisher for sentiment analysis insights.
 
-This module handles publishing structured JSON logs to multiple CloudWatch log streams,
-with buffering, batch writing, and retry logic for resilient log delivery.
+This module handles publishing metrics to CloudWatch Metrics for dashboard visualization.
 """
 
-import json
-import time
 import uuid
-from datetime import datetime
 from typing import Any, Dict, List, Optional
-from dataclasses import asdict
-
-try:
-    from .models import (
-        ProductInsight,
-        TopicInsight,
-        EngagementInsight,
-        GeographicInsight,
-        ViralEventInsight,
-    )
-    from .serialization import SentimentJSONEncoder
-except ImportError:
-    from models import (
-        ProductInsight,
-        TopicInsight,
-        EngagementInsight,
-        GeographicInsight,
-        ViralEventInsight,
-    )
-    from serialization import SentimentJSONEncoder
+from datetime import datetime
 
 
 class CloudWatchPublisher:
     """
-    Publishes sentiment insights to CloudWatch Logs with buffering and retry logic.
-    
-    This class manages multiple log streams for different insight types, handles
-    sequence token management, implements batch writing with buffering, and provides
-    retry logic for transient CloudWatch API failures.
+    Publishes sentiment insights to CloudWatch Metrics for dashboard visualization.
     """
-    
-    # Log stream names for different insight types
-    PRODUCT_SENTIMENT_STREAM = "product-sentiment"
-    TRENDING_TOPICS_STREAM = "trending-topics"
-    ENGAGEMENT_SENTIMENT_STREAM = "engagement-sentiment"
-    GEOGRAPHIC_SENTIMENT_STREAM = "geographic-sentiment"
-    VIRAL_EVENTS_STREAM = "viral-events"
-    
-    # Buffer configuration
-    MAX_BUFFER_SIZE = 100  # Maximum entries per buffer before flush
-    MAX_BATCH_SIZE = 100   # Maximum entries per PutLogEvents call
-    
-    # Retry configuration
-    MAX_RETRIES = 3
-    INITIAL_RETRY_DELAY_MS = 100
-    MAX_RETRY_DELAY_MS = 1000
     
     def __init__(
         self,
-        logs_client,
-        log_group_name: str,
+        metrics_client,
+        environment: str = 'production',
         demo_phase: Optional[int] = None,
         batch_id: Optional[str] = None,
     ):
@@ -68,336 +25,194 @@ class CloudWatchPublisher:
         Initialize CloudWatch publisher.
         
         Args:
-            logs_client: boto3 CloudWatch Logs client
-            log_group_name: Name of the CloudWatch log group
+            metrics_client: boto3 CloudWatch Metrics client
+            environment: Environment name for metric dimensions
             demo_phase: Current demo phase number (for metadata)
             batch_id: Unique identifier for this processing batch
         """
-        self.logs_client = logs_client
-        self.log_group_name = log_group_name
+        self.metrics_client = metrics_client
+        self.environment = environment
         self.demo_phase = demo_phase or 0
         self.batch_id = batch_id or str(uuid.uuid4())
-        
-        # Buffers for each log stream
-        self._buffers: Dict[str, List[Dict[str, Any]]] = {
-            self.PRODUCT_SENTIMENT_STREAM: [],
-            self.TRENDING_TOPICS_STREAM: [],
-            self.ENGAGEMENT_SENTIMENT_STREAM: [],
-            self.GEOGRAPHIC_SENTIMENT_STREAM: [],
-            self.VIRAL_EVENTS_STREAM: [],
-        }
-        
-        # Sequence tokens for each log stream
-        self._sequence_tokens: Dict[str, Optional[str]] = {
-            self.PRODUCT_SENTIMENT_STREAM: None,
-            self.TRENDING_TOPICS_STREAM: None,
-            self.ENGAGEMENT_SENTIMENT_STREAM: None,
-            self.GEOGRAPHIC_SENTIMENT_STREAM: None,
-            self.VIRAL_EVENTS_STREAM: None,
-        }
     
-    def publish_product_sentiment(
+    def publish_metrics(
         self,
-        insights: List[ProductInsight],
-        processing_time_ms: Optional[float] = None,
+        insights: Dict[str, Any],
+        posts_count: int,
+        sentiment_results: List[Any]
     ) -> None:
         """
-        Publish product sentiment insights to CloudWatch.
+        Publish aggregated metrics to CloudWatch Metrics for dashboard visualization.
         
         Args:
-            insights: List of product sentiment insights
-            processing_time_ms: Time taken to process this batch
+            insights: Dictionary containing all extracted insights
+            posts_count: Total number of posts processed
+            sentiment_results: List of sentiment results
         """
-        for insight in insights:
-            log_entry = self._create_log_entry(
-                insight_type="product_sentiment",
-                data=asdict(insight),
-                processing_time_ms=processing_time_ms,
-            )
-            self._add_to_buffer(self.PRODUCT_SENTIMENT_STREAM, log_entry)
-    
-    def publish_trending_topics(
-        self,
-        insights: List[TopicInsight],
-        processing_time_ms: Optional[float] = None,
-    ) -> None:
-        """
-        Publish trending topics insights to CloudWatch.
-        
-        Args:
-            insights: List of trending topic insights
-            processing_time_ms: Time taken to process this batch
-        """
-        for insight in insights:
-            log_entry = self._create_log_entry(
-                insight_type="trending_topics",
-                data=asdict(insight),
-                processing_time_ms=processing_time_ms,
-            )
-            self._add_to_buffer(self.TRENDING_TOPICS_STREAM, log_entry)
-    
-    def publish_engagement_sentiment(
-        self,
-        insight: EngagementInsight,
-        processing_time_ms: Optional[float] = None,
-    ) -> None:
-        """
-        Publish engagement-sentiment correlation insight to CloudWatch.
-        
-        Args:
-            insight: Engagement sentiment insight
-            processing_time_ms: Time taken to process this batch
-        """
-        log_entry = self._create_log_entry(
-            insight_type="engagement_sentiment",
-            data=asdict(insight),
-            processing_time_ms=processing_time_ms,
-        )
-        self._add_to_buffer(self.ENGAGEMENT_SENTIMENT_STREAM, log_entry)
-    
-    def publish_geographic_sentiment(
-        self,
-        insights: List[GeographicInsight],
-        processing_time_ms: Optional[float] = None,
-    ) -> None:
-        """
-        Publish geographic sentiment insights to CloudWatch.
-        
-        Args:
-            insights: List of geographic sentiment insights
-            processing_time_ms: Time taken to process this batch
-        """
-        for insight in insights:
-            log_entry = self._create_log_entry(
-                insight_type="geographic_sentiment",
-                data=asdict(insight),
-                processing_time_ms=processing_time_ms,
-            )
-            self._add_to_buffer(self.GEOGRAPHIC_SENTIMENT_STREAM, log_entry)
-    
-    def publish_viral_events(
-        self,
-        insights: List[ViralEventInsight],
-        processing_time_ms: Optional[float] = None,
-    ) -> None:
-        """
-        Publish viral event insights to CloudWatch.
-        
-        Args:
-            insights: List of viral event insights
-            processing_time_ms: Time taken to process this batch
-        """
-        for insight in insights:
-            log_entry = self._create_log_entry(
-                insight_type="viral_events",
-                data=asdict(insight),
-                processing_time_ms=processing_time_ms,
-            )
-            self._add_to_buffer(self.VIRAL_EVENTS_STREAM, log_entry)
-    
-    def flush_all(self) -> None:
-        """
-        Flush all buffered log entries to CloudWatch.
-        
-        This should be called before Lambda timeout or at the end of processing
-        to ensure all logs are written.
-        """
-        for stream_name in self._buffers.keys():
-            self._flush_buffer(stream_name)
-    
-    def _create_log_entry(
-        self,
-        insight_type: str,
-        data: Dict[str, Any],
-        processing_time_ms: Optional[float] = None,
-    ) -> Dict[str, Any]:
-        """
-        Create a structured log entry with metadata.
-        
-        Args:
-            insight_type: Type of insight (e.g., "product_sentiment")
-            data: Insight data dictionary
-            processing_time_ms: Processing time in milliseconds
-            
-        Returns:
-            Structured log entry dictionary
-        """
-        # Convert datetime objects to ISO 8601 strings
-        for key, value in data.items():
-            if isinstance(value, datetime):
-                data[key] = value.isoformat()
-        
-        return {
-            "timestamp": datetime.utcnow().isoformat(),
-            "insight_type": insight_type,
-            "demo_phase": self.demo_phase,
-            "batch_id": self.batch_id,
-            "processing_time_ms": processing_time_ms,
-            "data": data,
-        }
-    
-    def _add_to_buffer(self, stream_name: str, log_entry: Dict[str, Any]) -> None:
-        """
-        Add log entry to buffer and flush if buffer is full.
-        
-        Args:
-            stream_name: Name of the log stream
-            log_entry: Log entry to add
-        """
-        self._buffers[stream_name].append(log_entry)
-        
-        # Flush if buffer is full
-        if len(self._buffers[stream_name]) >= self.MAX_BUFFER_SIZE:
-            self._flush_buffer(stream_name)
-    
-    def _flush_buffer(self, stream_name: str) -> None:
-        """
-        Flush buffered log entries to CloudWatch with retry logic.
-        
-        Args:
-            stream_name: Name of the log stream to flush
-        """
-        buffer = self._buffers[stream_name]
-        if not buffer:
+        if not self.metrics_client:
             return
         
-        # Process buffer in batches (CloudWatch limit is 10,000 events per call,
-        # but we use smaller batches for better error handling)
-        while buffer:
-            batch = buffer[:self.MAX_BATCH_SIZE]
-            
-            # Convert log entries to CloudWatch format
-            log_events = [
-                {
-                    "timestamp": int(datetime.utcnow().timestamp() * 1000),
-                    "message": json.dumps(entry, cls=SentimentJSONEncoder, ensure_ascii=False),
-                }
-                for entry in batch
-            ]
-            
-            # Sort by timestamp (required by CloudWatch)
-            log_events.sort(key=lambda x: x["timestamp"])
-            
-            # Write to CloudWatch with retry logic
-            success = self._write_log_events_with_retry(stream_name, log_events)
-            
-            if success:
-                # Remove successfully written entries from buffer
-                del buffer[:self.MAX_BATCH_SIZE]
-            else:
-                # Keep failed entries in buffer for next attempt
-                # Log warning but don't fail the entire batch
-                print(f"Warning: Failed to write {len(batch)} log entries to {stream_name}")
-                break
-    
-    def _write_log_events_with_retry(
-        self,
-        stream_name: str,
-        log_events: List[Dict[str, Any]],
-    ) -> bool:
-        """
-        Write log events to CloudWatch with exponential backoff retry.
-        
-        Args:
-            stream_name: Name of the log stream
-            log_events: List of log events to write
-            
-        Returns:
-            True if write succeeded, False otherwise
-        """
-        retry_delay_ms = self.INITIAL_RETRY_DELAY_MS
-        
-        for attempt in range(self.MAX_RETRIES):
-            try:
-                # Prepare request parameters
-                params = {
-                    "logGroupName": self.log_group_name,
-                    "logStreamName": stream_name,
-                    "logEvents": log_events,
-                }
-                
-                # Include sequence token if we have one
-                if self._sequence_tokens[stream_name] is not None:
-                    params["sequenceToken"] = self._sequence_tokens[stream_name]
-                
-                # Write to CloudWatch
-                response = self.logs_client.put_log_events(**params)
-                
-                # Update sequence token for next write
-                self._sequence_tokens[stream_name] = response.get("nextSequenceToken")
-                
-                return True
-                
-            except self.logs_client.exceptions.ResourceNotFoundException:
-                # Log stream doesn't exist, create it
-                if self._create_log_stream(stream_name):
-                    # Retry write after creating stream
-                    continue
-                else:
-                    return False
-                    
-            except self.logs_client.exceptions.InvalidSequenceTokenException as e:
-                # Sequence token is invalid, extract correct token from error
-                error_message = str(e)
-                if "expectedSequenceToken" in error_message:
-                    # Extract token from error message
-                    import re
-                    match = re.search(r'expectedSequenceToken: (\S+)', error_message)
-                    if match:
-                        self._sequence_tokens[stream_name] = match.group(1)
-                        # Retry with correct token
-                        continue
-                return False
-                
-            except self.logs_client.exceptions.DataAlreadyAcceptedException as e:
-                # Data was already accepted (duplicate), treat as success
-                error_message = str(e)
-                if "expectedSequenceToken" in error_message:
-                    import re
-                    match = re.search(r'expectedSequenceToken: (\S+)', error_message)
-                    if match:
-                        self._sequence_tokens[stream_name] = match.group(1)
-                return True
-                
-            except self.logs_client.exceptions.ThrottlingException:
-                # Rate limited, retry with exponential backoff
-                if attempt < self.MAX_RETRIES - 1:
-                    time.sleep(retry_delay_ms / 1000.0)
-                    retry_delay_ms = min(retry_delay_ms * 2, self.MAX_RETRY_DELAY_MS)
-                    continue
-                return False
-                
-            except Exception as e:
-                # Unexpected error, log and fail
-                print(f"Error writing to CloudWatch stream {stream_name}: {e}")
-                return False
-        
-        return False
-    
-    def _create_log_stream(self, stream_name: str) -> bool:
-        """
-        Create a log stream if it doesn't exist.
-        
-        Args:
-            stream_name: Name of the log stream to create
-            
-        Returns:
-            True if stream was created or already exists, False on error
-        """
         try:
-            self.logs_client.create_log_stream(
-                logGroupName=self.log_group_name,
-                logStreamName=stream_name,
-            )
-            # Reset sequence token for new stream
-            self._sequence_tokens[stream_name] = None
-            return True
+            from datetime import datetime
             
-        except self.logs_client.exceptions.ResourceAlreadyExistsException:
-            # Stream already exists, that's fine
-            self._sequence_tokens[stream_name] = None
-            return True
+            metric_data = []
+            timestamp = datetime.utcnow()
+            
+            # Calculate sentiment distribution
+            positive_count = sum(1 for r in sentiment_results if r.sentiment == 'positive')
+            negative_count = sum(1 for r in sentiment_results if r.sentiment == 'negative')
+            neutral_count = sum(1 for r in sentiment_results if r.sentiment == 'neutral')
+            
+            avg_sentiment_score = sum(r.sentiment_score for r in sentiment_results) / len(sentiment_results) if sentiment_results else 0
+            avg_confidence = sum(r.confidence for r in sentiment_results) / len(sentiment_results) if sentiment_results else 0
+            
+            # Sentiment distribution metrics
+            metric_data.extend([
+                {
+                    'MetricName': 'PositivePosts',
+                    'Value': positive_count,
+                    'Unit': 'Count',
+                    'Timestamp': timestamp,
+                    'Dimensions': [
+                        {'Name': 'Environment', 'Value': self.environment},
+                        {'Name': 'DemoPhase', 'Value': str(self.demo_phase)}
+                    ]
+                },
+                {
+                    'MetricName': 'NegativePosts',
+                    'Value': negative_count,
+                    'Unit': 'Count',
+                    'Timestamp': timestamp,
+                    'Dimensions': [
+                        {'Name': 'Environment', 'Value': self.environment},
+                        {'Name': 'DemoPhase', 'Value': str(self.demo_phase)}
+                    ]
+                },
+                {
+                    'MetricName': 'NeutralPosts',
+                    'Value': neutral_count,
+                    'Unit': 'Count',
+                    'Timestamp': timestamp,
+                    'Dimensions': [
+                        {'Name': 'Environment', 'Value': self.environment},
+                        {'Name': 'DemoPhase', 'Value': str(self.demo_phase)}
+                    ]
+                },
+                {
+                    'MetricName': 'AverageSentimentScore',
+                    'Value': avg_sentiment_score,
+                    'Unit': 'None',
+                    'Timestamp': timestamp,
+                    'Dimensions': [
+                        {'Name': 'Environment', 'Value': self.environment},
+                        {'Name': 'DemoPhase', 'Value': str(self.demo_phase)}
+                    ]
+                },
+                {
+                    'MetricName': 'AverageConfidence',
+                    'Value': avg_confidence,
+                    'Unit': 'None',
+                    'Timestamp': timestamp,
+                    'Dimensions': [
+                        {'Name': 'Environment', 'Value': self.environment},
+                        {'Name': 'DemoPhase', 'Value': str(self.demo_phase)}
+                    ]
+                }
+            ])
+            
+            # Product sentiment metrics (top products)
+            if 'product_insights' in insights and insights['product_insights']:
+                for insight in insights['product_insights'][:10]:  # Top 10 products
+                    metric_data.append({
+                        'MetricName': 'ProductSentiment',
+                        'Value': insight.average_sentiment,
+                        'Unit': 'None',
+                        'Timestamp': timestamp,
+                        'Dimensions': [
+                            {'Name': 'Environment', 'Value': self.environment},
+                            {'Name': 'Product', 'Value': insight.product_name[:255]}  # CloudWatch dimension limit
+                        ]
+                    })
+            
+            # Trending topics metrics
+            if 'topic_insights' in insights and insights['topic_insights']:
+                trending_count = sum(1 for t in insights['topic_insights'] if t.is_trending)
+                metric_data.append({
+                    'MetricName': 'TrendingTopicsCount',
+                    'Value': trending_count,
+                    'Unit': 'Count',
+                    'Timestamp': timestamp,
+                    'Dimensions': [
+                        {'Name': 'Environment', 'Value': self.environment},
+                        {'Name': 'DemoPhase', 'Value': str(self.demo_phase)}
+                    ]
+                })
+                
+                # Top hashtags by post count
+                for insight in insights['topic_insights'][:10]:
+                    metric_data.append({
+                        'MetricName': 'HashtagPostCount',
+                        'Value': insight.post_count,
+                        'Unit': 'Count',
+                        'Timestamp': timestamp,
+                        'Dimensions': [
+                            {'Name': 'Environment', 'Value': self.environment},
+                            {'Name': 'Hashtag', 'Value': insight.hashtag[:255]}
+                        ]
+                    })
+            
+            # Engagement-sentiment correlation
+            if 'engagement_insight' in insights and insights['engagement_insight']:
+                eng_insight = insights['engagement_insight']
+                metric_data.append({
+                    'MetricName': 'EngagementSentimentCorrelation',
+                    'Value': eng_insight.correlation_coefficient,
+                    'Unit': 'None',
+                    'Timestamp': timestamp,
+                    'Dimensions': [
+                        {'Name': 'Environment', 'Value': self.environment},
+                        {'Name': 'DemoPhase', 'Value': str(self.demo_phase)}
+                    ]
+                })
+                
+                # Controversial posts (high engagement + negative sentiment)
+                controversial_count = len(eng_insight.high_engagement_negative_posts)
+                metric_data.append({
+                    'MetricName': 'ControversialPosts',
+                    'Value': controversial_count,
+                    'Unit': 'Count',
+                    'Timestamp': timestamp,
+                    'Dimensions': [
+                        {'Name': 'Environment', 'Value': self.environment},
+                        {'Name': 'DemoPhase', 'Value': str(self.demo_phase)}
+                    ]
+                })
+            
+            # Geographic sentiment metrics
+            if 'geographic_insights' in insights and insights['geographic_insights']:
+                for geo_insight in insights['geographic_insights'][:20]:  # Top 20 locations
+                    metric_data.append({
+                        'MetricName': 'GeographicSentiment',
+                        'Value': geo_insight.average_sentiment,
+                        'Unit': 'None',
+                        'Timestamp': timestamp,
+                        'Dimensions': [
+                            {'Name': 'Environment', 'Value': self.environment},
+                            {'Name': 'Country', 'Value': geo_insight.country[:255]},
+                            {'Name': 'City', 'Value': geo_insight.city[:255]}
+                        ]
+                    })
+            
+            # Publish metrics in batches of 20 (CloudWatch limit)
+            for i in range(0, len(metric_data), 20):
+                batch = metric_data[i:i+20]
+                self.metrics_client.put_metric_data(
+                    Namespace='SentimentAnalysis/Insights',
+                    MetricData=batch
+                )
+            
+            print(f"Published {len(metric_data)} insight metrics to CloudWatch")
             
         except Exception as e:
-            print(f"Error creating log stream {stream_name}: {e}")
-            return False
+            print(f"Error publishing insight metrics: {e}")
+            # Don't raise - metrics publishing failure shouldn't fail the Lambda

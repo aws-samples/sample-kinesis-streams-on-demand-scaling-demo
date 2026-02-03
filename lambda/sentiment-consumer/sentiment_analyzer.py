@@ -180,7 +180,7 @@ class SentimentAnalyzer:
             f"max_retries: {max_retries}"
         )
     
-    async def analyze_batch(self, posts: List[Any]) -> List[SentimentResult]:
+    def analyze_batch(self, posts: List[Any]) -> List[SentimentResult]:
         """
         Analyze sentiment for a batch of social media posts.
         
@@ -210,7 +210,7 @@ class SentimentAnalyzer:
             
             # Invoke Bedrock API
             logger.info(f"Analyzing batch of {len(posts)} posts with Bedrock")
-            response = await self._invoke_bedrock(prompt)
+            response = self._invoke_bedrock(prompt)
             
             # Parse response
             sentiment_results = self._parse_response(response, posts)
@@ -286,7 +286,7 @@ Return ONLY the JSON array, no additional text."""
         
         return prompt
     
-    async def _invoke_bedrock(self, prompt: str) -> Dict[str, Any]:
+    def _invoke_bedrock(self, prompt: str) -> Dict[str, Any]:
         """
         Invoke the Bedrock API with the constructed prompt.
         

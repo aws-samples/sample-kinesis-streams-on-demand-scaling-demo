@@ -11,7 +11,6 @@ import json
 import time
 import uuid
 import logging
-import asyncio
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
@@ -37,7 +36,6 @@ logger.setLevel(logging.INFO)
 
 # Initialize AWS clients (reused across invocations)
 bedrock_client = None
-cloudwatch_logs_client = None
 cloudwatch_metrics_client = None
 
 
@@ -48,16 +46,6 @@ def get_bedrock_client():
         bedrock_region = os.environ.get('BEDROCK_REGION', 'us-east-1')
         bedrock_client = boto3.client('bedrock-runtime', region_name=bedrock_region)
     return bedrock_client
-
-
-def get_cloudwatch_logs_client():
-    """Get or create CloudWatch Logs client."""
-    global cloudwatch_logs_client
-    if cloudwatch_logs_client is None:
-        cloudwatch_logs_client = boto3.client('logs')
-    return cloudwatch_logs_client
-
-
 def get_cloudwatch_metrics_client():
     """Get or create CloudWatch Metrics client."""
     global cloudwatch_metrics_client
@@ -74,7 +62,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     1. Deserializing records into SocialMediaPost objects
     2. Analyzing sentiment using Amazon Bedrock Nova Micro
     3. Extracting insights across multiple dimensions
-    4. Publishing insights to CloudWatch Logs
+    4. Publishing insights to CloudWatch Metrics
     5. Emitting processing metrics
     6. Handling timeouts gracefully
     
@@ -94,22 +82,17 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     
     # Extract configuration from environment
     model_id = os.environ.get('BEDROCK_MODEL_ID', 'amazon.nova-micro-v1:0')
-    log_group_name = os.environ.get('LOG_GROUP_NAME', '/aws/lambda/sentiment-analysis-consumer')
     demo_phase = int(os.environ.get('DEMO_PHASE', '0'))
     environment = os.environ.get('ENVIRONMENT', 'dev')
     
     # Initialize components
     deserializer = RecordDeserializer()
-    batch_processor = BatchProcessor(max_batch_size=25)
-    sentiment_analyzer = SentimentAnalyzer(
-        get_bedrock_client(),
-        cloudwatch_client=get_cloudwatch_metrics_client(),
-        model_id=model_id,
-        environment=environment
-    )
+    # Set batch size to a very large number to ensure all posts go in one batch
+    batch_processor = BatchProcessor(max_batch_size=10000)
+    sentiment_analyzer = SentimentAnalyzer(get_bedrock_client(), model_id=model_id)
     cloudwatch_publisher = CloudWatchPublisher(
-        get_cloudwatch_logs_client(),
-        log_group_name=log_group_name,
+        metrics_client=get_cloudwatch_metrics_client(),
+        environment=environment,
         demo_phase=demo_phase,
         batch_id=batch_id
     )
@@ -201,11 +184,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 batch_start = time.time()
                 logger.info(f"Analyzing batch {i+1}/{len(post_batches)} ({len(batch)} posts)")
                 
-                # Run async sentiment analysis
-                loop = asyncio.get_event_loop()
-                sentiment_results = loop.run_until_complete(
-                    sentiment_analyzer.analyze_batch(batch)
-                )
+                # Run sentiment analysis (synchronous)
+                sentiment_results = sentiment_analyzer.analyze_batch(batch)
                 
                 batch_latency_ms = (time.time() - batch_start) * 1000
                 bedrock_api_calls += 1
@@ -234,7 +214,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         logger.info(f"Total sentiment results: {len(all_sentiment_results)}")
         
-        # Step 4: Extract insights using all extractors
+        # Step 4: Extract insights and publish metrics
         logger.info("Extracting insights from sentiment results")
         processing_time_ms = (time.time() - start_time) * 1000
         
@@ -242,36 +222,33 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             # Product sentiment insights
             product_insights = product_extractor.extract_insights(posts, all_sentiment_results)
             logger.info(f"Extracted {len(product_insights)} product insights")
-            cloudwatch_publisher.publish_product_sentiment(product_insights, processing_time_ms)
             
             # Trending topics insights
             topic_insights = topics_extractor.extract_insights(posts, all_sentiment_results)
             logger.info(f"Extracted {len(topic_insights)} topic insights")
-            cloudwatch_publisher.publish_trending_topics(topic_insights, processing_time_ms)
             
             # Engagement-sentiment correlation
             engagement_insight = engagement_correlator.extract_insights(posts, all_sentiment_results)
             logger.info("Extracted engagement-sentiment correlation insight")
-            cloudwatch_publisher.publish_engagement_sentiment(engagement_insight, processing_time_ms)
             
             # Geographic sentiment insights
             geographic_insights = geographic_analyzer.extract_insights(posts, all_sentiment_results)
             logger.info(f"Extracted {len(geographic_insights)} geographic insights")
-            cloudwatch_publisher.publish_geographic_sentiment(geographic_insights, processing_time_ms)
+            
+            # Publish aggregated metrics to CloudWatch Metrics for dashboards
+            insights_dict = {
+                'product_insights': product_insights,
+                'topic_insights': topic_insights,
+                'engagement_insight': engagement_insight,
+                'geographic_insights': geographic_insights
+            }
+            cloudwatch_publisher.publish_metrics(insights_dict, len(posts), all_sentiment_results)
+            logger.info("Published insight metrics to CloudWatch")
             
         except Exception as e:
             logger.error(f"Failed to extract insights: {e}", exc_info=True)
-            # Continue to flush logs even if insight extraction fails
         
-        # Step 5: Flush all buffered logs to CloudWatch
-        logger.info("Flushing CloudWatch logs")
-        try:
-            cloudwatch_publisher.flush_all()
-            logger.info("Successfully flushed all logs to CloudWatch")
-        except Exception as e:
-            logger.error(f"Failed to flush logs to CloudWatch: {e}", exc_info=True)
-        
-        # Step 6: Emit processing metrics
+        # Step 5: Emit processing metrics
         total_processing_time_ms = (time.time() - start_time) * 1000
         
         try:
@@ -299,12 +276,6 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
     except Exception as e:
         logger.error(f"Unexpected error in Lambda handler: {e}", exc_info=True)
-        
-        # Try to flush logs before failing
-        try:
-            cloudwatch_publisher.flush_all()
-        except:
-            pass
         
         # Try to emit error metrics
         try:

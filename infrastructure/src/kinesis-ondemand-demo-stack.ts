@@ -26,6 +26,7 @@ export class KinesisOnDemandDemoStack extends cdk.Stack {
   public readonly stepFunctionsStateMachine: stepfunctions.StateMachine;
 
   public readonly dashboard: cloudwatch.CfnDashboard;
+  public readonly sentimentDashboard: cloudwatch.CfnDashboard;
 
   constructor(scope: Construct, id: string, props: KinesisOnDemandDemoStackProps) {
     super(scope, id, props);
@@ -61,6 +62,9 @@ export class KinesisOnDemandDemoStack extends cdk.Stack {
 
     // Create CloudWatch Dashboard
     this.dashboard = this.createCloudWatchDashboard(environment);
+    
+    // Create Sentiment Analysis Dashboard
+    this.sentimentDashboard = this.createSentimentAnalysisDashboard(environment);
 
     // Create CloudWatch Log Groups with retention policies
     this.createLogGroups(environment);
@@ -1159,6 +1163,288 @@ def lambda_handler(event, context):
     return dashboard;
   }
 
+  private createSentimentAnalysisDashboard(environment: string): cloudwatch.CfnDashboard {
+    const dashboardName = `sentiment-analysis-${environment}`;
+    
+    const dashboardBody = {
+      widgets: [
+        {
+          type: "metric",
+          x: 0,
+          y: 0,
+          width: 12,
+          height: 6,
+          properties: {
+            metrics: [
+              [ "SentimentAnalysis/Insights", "PositivePosts", "Environment", environment, "DemoPhase", "0", { stat: "Sum", color: "#2ca02c" } ],
+              [ "...", "NegativePosts", ".", ".", ".", ".", { stat: "Sum", color: "#d62728" } ],
+              [ "...", "NeutralPosts", ".", ".", ".", ".", { stat: "Sum", color: "#7f7f7f" } ]
+            ],
+            view: "timeSeries",
+            stacked: true,
+            region: this.region,
+            title: "Sentiment Distribution Over Time",
+            period: 300,
+            yAxis: {
+              left: {
+                label: "Post Count"
+              }
+            }
+          }
+        },
+        {
+          type: "metric",
+          x: 12,
+          y: 0,
+          width: 6,
+          height: 6,
+          properties: {
+            metrics: [
+              [ "SentimentAnalysis/Insights", "PositivePosts", "Environment", environment, "DemoPhase", "0", { stat: "Sum", label: "Positive" } ],
+              [ "...", "NegativePosts", ".", ".", ".", ".", { stat: "Sum", label: "Negative" } ],
+              [ "...", "NeutralPosts", ".", ".", ".", ".", { stat: "Sum", label: "Neutral" } ]
+            ],
+            view: "pie",
+            region: this.region,
+            title: "Overall Sentiment Distribution",
+            period: 3600,
+            setPeriodToTimeRange: true
+          }
+        },
+        {
+          type: "metric",
+          x: 18,
+          y: 0,
+          width: 6,
+          height: 6,
+          properties: {
+            metrics: [
+              [ "SentimentAnalysis/Insights", "AverageSentimentScore", "Environment", environment, "DemoPhase", "0", { stat: "Average" } ]
+            ],
+            view: "singleValue",
+            region: this.region,
+            title: "Average Sentiment Score",
+            period: 300,
+            setPeriodToTimeRange: false
+          }
+        },
+        {
+          type: "metric",
+          x: 0,
+          y: 6,
+          width: 12,
+          height: 6,
+          properties: {
+            metrics: [
+              [ "SentimentAnalysis/Insights", "AverageSentimentScore", "Environment", environment, "DemoPhase", "0", { stat: "Average" } ]
+            ],
+            view: "timeSeries",
+            region: this.region,
+            title: "Sentiment Score Trend",
+            period: 300,
+            yAxis: {
+              left: {
+                min: -1,
+                max: 1,
+                label: "Sentiment Score"
+              }
+            },
+            annotations: {
+              horizontal: [
+                {
+                  value: 0,
+                  label: "Neutral",
+                  fill: "above"
+                }
+              ]
+            }
+          }
+        },
+        {
+          type: "metric",
+          x: 12,
+          y: 6,
+          width: 12,
+          height: 6,
+          properties: {
+            metrics: [
+              [ "SentimentAnalysis/Insights", "TrendingTopicsCount", "Environment", environment, "DemoPhase", "0", { stat: "Sum" } ]
+            ],
+            view: "timeSeries",
+            region: this.region,
+            title: "Trending Topics Count",
+            period: 300,
+            yAxis: {
+              left: {
+                label: "Count"
+              }
+            }
+          }
+        },
+        {
+          type: "metric",
+          x: 0,
+          y: 12,
+          width: 12,
+          height: 6,
+          properties: {
+            metrics: [
+              [ "SentimentAnalysis/Insights", "EngagementSentimentCorrelation", "Environment", environment, "DemoPhase", "0", { stat: "Average" } ]
+            ],
+            view: "timeSeries",
+            region: this.region,
+            title: "Engagement-Sentiment Correlation",
+            period: 300,
+            yAxis: {
+              left: {
+                min: -1,
+                max: 1,
+                label: "Correlation"
+              }
+            }
+          }
+        },
+        {
+          type: "metric",
+          x: 12,
+          y: 12,
+          width: 12,
+          height: 6,
+          properties: {
+            metrics: [
+              [ "SentimentAnalysis/Insights", "ControversialPosts", "Environment", environment, "DemoPhase", "0", { stat: "Sum" } ]
+            ],
+            view: "timeSeries",
+            region: this.region,
+            title: "Controversial Posts (High Engagement, Negative Sentiment)",
+            period: 300,
+            yAxis: {
+              left: {
+                label: "Count"
+              }
+            }
+          }
+        },
+        {
+          type: "metric",
+          x: 0,
+          y: 18,
+          width: 24,
+          height: 6,
+          properties: {
+            metrics: [
+              [ { expression: "SEARCH('{SentimentAnalysis/Insights,Product} MetricName=\"ProductSentiment\"', 'Average', 300)", id: "e1" } ]
+            ],
+            view: "timeSeries",
+            region: this.region,
+            title: "Product Sentiment Scores",
+            period: 300,
+            yAxis: {
+              left: {
+                min: -1,
+                max: 1,
+                label: "Sentiment"
+              }
+            }
+          }
+        },
+        {
+          type: "metric",
+          x: 0,
+          y: 24,
+          width: 24,
+          height: 6,
+          properties: {
+            metrics: [
+              [ { expression: "SEARCH('{SentimentAnalysis/Insights,Hashtag} MetricName=\"HashtagPostCount\"', 'Sum', 300)", id: "e1" } ]
+            ],
+            view: "timeSeries",
+            region: this.region,
+            title: "Hashtag Post Counts",
+            period: 300,
+            yAxis: {
+              left: {
+                label: "Post Count"
+              }
+            }
+          }
+        },
+        {
+          type: "metric",
+          x: 0,
+          y: 30,
+          width: 24,
+          height: 6,
+          properties: {
+            metrics: [
+              [ { expression: "SEARCH('{SentimentAnalysis/Insights,City,Country} MetricName=\"GeographicSentiment\"', 'Average', 300)", id: "e1" } ]
+            ],
+            view: "timeSeries",
+            region: this.region,
+            title: "Geographic Sentiment by Location",
+            period: 300,
+            yAxis: {
+              left: {
+                min: -1,
+                max: 1,
+                label: "Sentiment"
+              }
+            }
+          }
+        },
+        {
+          type: "metric",
+          x: 0,
+          y: 36,
+          width: 12,
+          height: 6,
+          properties: {
+            metrics: [
+              [ "AWS/Lambda", "Invocations", { stat: "Sum", label: "Lambda Invocations" } ],
+              [ ".", "Errors", { stat: "Sum", label: "Errors", color: "#d62728" } ]
+            ],
+            view: "timeSeries",
+            region: this.region,
+            title: "Lambda Performance",
+            period: 300
+          }
+        },
+        {
+          type: "metric",
+          x: 12,
+          y: 36,
+          width: 12,
+          height: 6,
+          properties: {
+            metrics: [
+              [ "SentimentAnalysis/Consumer", "ErrorRate", { stat: "Average" } ],
+              [ ".", "ProcessingLatency", { stat: "Average", yAxis: "right" } ]
+            ],
+            view: "timeSeries",
+            region: this.region,
+            title: "Processing Metrics",
+            period: 300,
+            yAxis: {
+              left: {
+                label: "Error Rate (%)"
+              },
+              right: {
+                label: "Latency (ms)"
+              }
+            }
+          }
+        }
+      ]
+    };
+    
+    const dashboard = new cloudwatch.CfnDashboard(this, 'SentimentDashboard', {
+      dashboardName: dashboardName,
+      dashboardBody: JSON.stringify(dashboardBody),
+    });
+
+    return dashboard;
+  }
+
   private createLogGroups(environment: string) {
     // ECS log group (already created in ECS resources)
 
@@ -1231,6 +1517,12 @@ def lambda_handler(event, context):
       value: `https://${this.region}.console.aws.amazon.com/cloudwatch/home?region=${this.region}#dashboards:name=${this.dashboard.dashboardName}`,
       description: 'CloudWatch Dashboard URL',
       exportName: `${this.stackName}-DashboardUrl`,
+    });
+    
+    new cdk.CfnOutput(this, 'SentimentDashboardUrl', {
+      value: `https://${this.region}.console.aws.amazon.com/cloudwatch/home?region=${this.region}#dashboards:name=${this.sentimentDashboard.dashboardName}`,
+      description: 'Sentiment Analysis Dashboard URL',
+      exportName: `${this.stackName}-SentimentDashboardUrl`,
     });
 
     new cdk.CfnOutput(this, 'StepFunctionsConsoleUrl', {
