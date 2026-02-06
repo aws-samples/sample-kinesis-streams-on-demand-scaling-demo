@@ -1156,6 +1156,25 @@ def lambda_handler(event, context):
             setPeriodToTimeRange: false,
             sparkline: false
           }
+        },
+        {
+            type: "metric",
+            x: 12,
+            y: 12,
+            width: 12,
+            height: 6,
+            properties: {
+                metrics: [
+                    [ "AWS/Bedrock", "Invocations", "ModelId", "amazon.nova-lite-v1:0", { "id": "m1" } ],
+                    [ ".", "InvocationThrottles", ".", ".", { "id": "m2" } ]
+                ],
+                view: "timeSeries",
+                stacked: false,
+                region: "us-east-1",
+                stat: "Sum",
+                period: 60,
+                title: "Bedrock API Invocation"
+            }
         }
       ]
     };
@@ -1439,25 +1458,6 @@ def lambda_handler(event, context):
               }
             }
           }
-        },
-        {
-            type: "metric",
-            x: 12,
-            y: 12,
-            width: 12,
-            height: 6,
-            properties: {
-                metrics: [
-                    [ "AWS/Bedrock", "Invocations", "ModelId", "amazon.nova-lite-v1:0", { "id": "m1" } ],
-                    [ ".", "InvocationThrottles", ".", ".", { "id": "m2" } ]
-                ],
-                view: "timeSeries",
-                stacked: false,
-                region: "us-east-1",
-                stat: "Sum",
-                period: 60,
-                title: "Bedrock API Invocation"
-            }
         }
       ]
     };
