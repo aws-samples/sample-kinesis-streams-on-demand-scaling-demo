@@ -87,13 +87,13 @@ class EngagementSentimentCorrelator:
         Returns:
             EngagementInsight object with correlation analysis
             
-        Raises:
-            ValueError: If posts and sentiments lists don't match
+        Note:
+            Handles mismatches gracefully by only processing posts with sentiment results
         """
         if len(posts) != len(sentiments):
-            raise ValueError(
+            logger.warning(
                 f"Posts and sentiments count mismatch: {len(posts)} posts, "
-                f"{len(sentiments)} sentiments"
+                f"{len(sentiments)} sentiments. Will process available data."
             )
         
         if not posts:

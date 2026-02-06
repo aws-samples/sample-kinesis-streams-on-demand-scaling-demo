@@ -19,7 +19,6 @@ from botocore.exceptions import ClientError
 
 # Import local modules
 from deserializer import RecordDeserializer
-from batch_processor import BatchProcessor
 from sentiment_analyzer import SentimentAnalyzer
 from cloudwatch_publisher import CloudWatchPublisher
 from models import BatchProcessingMetrics
@@ -60,14 +59,13 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     
     This function processes Kinesis stream records by:
     1. Deserializing records into SocialMediaPost objects
-    2. Analyzing sentiment using Amazon Bedrock Nova Micro
+    2. Analyzing sentiment using Amazon Bedrock Nova Micro (single API call)
     3. Extracting insights across multiple dimensions
     4. Publishing insights to CloudWatch Metrics
     5. Emitting processing metrics
-    6. Handling timeouts gracefully
     
     Args:
-        event: Kinesis event with Records array
+        event: Kinesis event with Records array (batched by event source mapper)
         context: Lambda context object with runtime information
         
     Returns:
@@ -81,14 +79,12 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     logger.info(f"Starting sentiment analysis batch processing. Batch ID: {batch_id}")
     
     # Extract configuration from environment
-    model_id = os.environ.get('BEDROCK_MODEL_ID', 'amazon.nova-micro-v1:0')
+    model_id = os.environ.get('BEDROCK_MODEL_ID', 'amazon.nova-lite-v1:0')
     demo_phase = int(os.environ.get('DEMO_PHASE', '0'))
     environment = os.environ.get('ENVIRONMENT', 'dev')
     
     # Initialize components
     deserializer = RecordDeserializer()
-    # Set batch size to a very large number to ensure all posts go in one batch
-    batch_processor = BatchProcessor(max_batch_size=10000)
     sentiment_analyzer = SentimentAnalyzer(get_bedrock_client(), model_id=model_id)
     cloudwatch_publisher = CloudWatchPublisher(
         metrics_client=get_cloudwatch_metrics_client(),
@@ -108,7 +104,6 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     successful_records = 0
     failed_records = 0
     failed_sequence_numbers = []
-    bedrock_api_calls = 0
     bedrock_total_latency_ms = 0.0
     
     try:
@@ -139,100 +134,76 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             logger.warning("No posts to process after deserialization")
             return _create_response(failed_sequence_numbers)
         
-        # Step 2: Check remaining time before processing
-        remaining_time_ms = context.get_remaining_time_in_millis()
-        if remaining_time_ms < 30000:  # Less than 30 seconds
-            logger.warning(
-                f"Insufficient time remaining ({remaining_time_ms}ms). "
-                "Returning all records for retry."
-            )
-            # Return all records as failed for retry
-            all_sequence_numbers = [
-                record.get('kinesis', {}).get('sequenceNumber')
-                for record in event.get('Records', [])
-                if record.get('kinesis', {}).get('sequenceNumber')
-            ]
-            return _create_response(all_sequence_numbers)
+        # Step 2: Randomly sample 20 posts for sentiment analysis
+        # This ensures consistent Bedrock performance regardless of batch size
+        import random
+        sample_size = min(20, len(posts))
+        sampled_posts = random.sample(posts, sample_size)
         
-        # Step 3: Process posts through sentiment analyzer
-        logger.info(f"Creating batches for {len(posts)} posts")
-        post_batches = batch_processor.create_batches(posts)
-        logger.info(f"Created {len(post_batches)} batches for Bedrock processing")
+        logger.info(
+            f"Randomly sampled {sample_size} posts from {len(posts)} total posts for sentiment analysis"
+        )
         
-        # Analyze sentiment for all batches
-        all_sentiment_results = []
+        # Step 3: Analyze sentiment with single Bedrock API call
+        logger.info(f"Analyzing sentiment for {sample_size} posts with single Bedrock API call")
         
-        for i, batch in enumerate(post_batches):
-            # Check timeout before each batch
-            remaining_time_ms = context.get_remaining_time_in_millis()
-            if remaining_time_ms < 30000:
-                logger.warning(
-                    f"Timeout approaching ({remaining_time_ms}ms). "
-                    f"Processed {i}/{len(post_batches)} batches. "
-                    "Flushing logs and returning unprocessed records."
-                )
-                # Mark remaining posts as failed
-                for remaining_batch in post_batches[i:]:
-                    for post in remaining_batch:
-                        seq_num = post_to_sequence.get(post.id)
-                        if seq_num and seq_num not in failed_sequence_numbers:
-                            failed_sequence_numbers.append(seq_num)
-                            failed_records += 1
-                break
+        try:
+            bedrock_start = time.time()
+            sentiment_results = sentiment_analyzer.analyze_batch(sampled_posts)
+            bedrock_total_latency_ms = (time.time() - bedrock_start) * 1000
             
-            try:
-                batch_start = time.time()
-                logger.info(f"Analyzing batch {i+1}/{len(post_batches)} ({len(batch)} posts)")
-                
-                # Run sentiment analysis (synchronous)
-                sentiment_results = sentiment_analyzer.analyze_batch(batch)
-                
-                batch_latency_ms = (time.time() - batch_start) * 1000
-                bedrock_api_calls += 1
-                bedrock_total_latency_ms += batch_latency_ms
-                
-                all_sentiment_results.extend(sentiment_results)
-                successful_records += len(sentiment_results)
-                
-                logger.info(
-                    f"Batch {i+1} completed in {batch_latency_ms:.2f}ms. "
-                    f"Got {len(sentiment_results)} sentiment results."
-                )
-                
-            except Exception as e:
-                logger.error(f"Failed to analyze batch {i+1}: {e}", exc_info=True)
-                # Mark all posts in this batch as failed
-                for post in batch:
-                    seq_num = post_to_sequence.get(post.id)
-                    if seq_num and seq_num not in failed_sequence_numbers:
-                        failed_sequence_numbers.append(seq_num)
-                        failed_records += 1
+            successful_records += len(sentiment_results)
+            
+            logger.info(
+                f"Bedrock analysis completed in {bedrock_total_latency_ms:.2f}ms. "
+                f"Got {len(sentiment_results)} sentiment results from {sample_size} sampled posts."
+            )
+            
+        except Exception as e:
+            logger.error(f"Failed to analyze sentiment: {e}", exc_info=True)
+            # Mark all posts as failed
+            for post in posts:
+                seq_num = post_to_sequence.get(post.id)
+                if seq_num and seq_num not in failed_sequence_numbers:
+                    failed_sequence_numbers.append(seq_num)
+                    failed_records += 1
+            
+            # Return early with failures
+            total_processing_time_ms = (time.time() - start_time) * 1000
+            emit_processing_metrics(
+                environment=environment,
+                total_records=total_records,
+                successful_records=0,
+                failed_records=failed_records,
+                bedrock_api_calls=0,
+                bedrock_total_latency_ms=0.0,
+                total_processing_time_ms=total_processing_time_ms
+            )
+            return _create_response(failed_sequence_numbers)
         
-        if not all_sentiment_results:
+        if not sentiment_results:
             logger.warning("No sentiment results generated")
             return _create_response(failed_sequence_numbers)
         
-        logger.info(f"Total sentiment results: {len(all_sentiment_results)}")
-        
         # Step 4: Extract insights and publish metrics
+        # Use sampled posts for insight extraction to match sentiment results
         logger.info("Extracting insights from sentiment results")
-        processing_time_ms = (time.time() - start_time) * 1000
         
         try:
             # Product sentiment insights
-            product_insights = product_extractor.extract_insights(posts, all_sentiment_results)
+            product_insights = product_extractor.extract_insights(sampled_posts, sentiment_results)
             logger.info(f"Extracted {len(product_insights)} product insights")
             
             # Trending topics insights
-            topic_insights = topics_extractor.extract_insights(posts, all_sentiment_results)
+            topic_insights = topics_extractor.extract_insights(sampled_posts, sentiment_results)
             logger.info(f"Extracted {len(topic_insights)} topic insights")
             
             # Engagement-sentiment correlation
-            engagement_insight = engagement_correlator.extract_insights(posts, all_sentiment_results)
+            engagement_insight = engagement_correlator.extract_insights(sampled_posts, sentiment_results)
             logger.info("Extracted engagement-sentiment correlation insight")
             
             # Geographic sentiment insights
-            geographic_insights = geographic_analyzer.extract_insights(posts, all_sentiment_results)
+            geographic_insights = geographic_analyzer.extract_insights(sampled_posts, sentiment_results)
             logger.info(f"Extracted {len(geographic_insights)} geographic insights")
             
             # Publish aggregated metrics to CloudWatch Metrics for dashboards
@@ -242,7 +213,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 'engagement_insight': engagement_insight,
                 'geographic_insights': geographic_insights
             }
-            cloudwatch_publisher.publish_metrics(insights_dict, len(posts), all_sentiment_results)
+            cloudwatch_publisher.publish_metrics(insights_dict, len(sampled_posts), sentiment_results)
             logger.info("Published insight metrics to CloudWatch")
             
         except Exception as e:
@@ -257,7 +228,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 total_records=total_records,
                 successful_records=successful_records,
                 failed_records=failed_records,
-                bedrock_api_calls=bedrock_api_calls,
+                bedrock_api_calls=1,  # Single API call per Lambda invocation
                 bedrock_total_latency_ms=bedrock_total_latency_ms,
                 total_processing_time_ms=total_processing_time_ms
             )
@@ -285,7 +256,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 total_records=total_records,
                 successful_records=successful_records,
                 failed_records=total_records,  # Mark all as failed
-                bedrock_api_calls=bedrock_api_calls,
+                bedrock_api_calls=0,
                 bedrock_total_latency_ms=bedrock_total_latency_ms,
                 total_processing_time_ms=total_processing_time_ms
             )

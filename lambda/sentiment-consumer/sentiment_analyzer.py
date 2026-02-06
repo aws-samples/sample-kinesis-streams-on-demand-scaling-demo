@@ -149,14 +149,14 @@ class SentimentAnalyzer:
     
     Attributes:
         bedrock_client: Boto3 Bedrock Runtime client
-        model_id: Bedrock model identifier (default: amazon.nova-micro-v1:0)
+        model_id: Bedrock model identifier (default: amazon.nova-lite-v1:0)
         backoff: ExponentialBackoff instance for retry logic
     """
     
     def __init__(
         self, 
         bedrock_client, 
-        model_id: str = "amazon.nova-micro-v1:0",
+        model_id: str = "amazon.nova-lite-v1:0",
         max_retries: int = 3
     ):
         """
@@ -234,55 +234,42 @@ class SentimentAnalyzer:
     
     def _build_prompt(self, posts: List[Any]) -> str:
         """
-        Build a structured prompt for Bedrock sentiment analysis.
+        Build an optimized prompt for Bedrock sentiment analysis.
         
-        The prompt instructs the model to analyze each post and return results
-        in a specific JSON format with sentiment classification, score, and confidence.
+        Sends only the first 10 words of each post to minimize token costs.
+        Requests a simple numeric array for maximum efficiency.
         
         Args:
             posts: List of SocialMediaPost objects
             
         Returns:
-            Formatted prompt string
+            Formatted prompt string requesting array of numeric scores
         """
-        # Build the posts section
-        posts_text = []
-        for i, post in enumerate(posts, 1):
-            post_text = f"{i}. Post ID: {post.id}\n   Content: {post.content}"
-            if post.hashtags:
-                post_text += f"\n   Hashtags: {', '.join(post.hashtags)}"
-            posts_text.append(post_text)
+        # Extract first 10 words from each post for cost optimization
+        post_texts = []
+        for post in posts:
+            words = post.content.split()[:10]  # Take only first 10 words
+            truncated_text = ' '.join(words)
+            post_texts.append(truncated_text)
         
-        posts_section = "\n\n".join(posts_text)
+        # Create JSON array of texts (most efficient format)
+        posts_json = json.dumps(post_texts)
         
-        # Construct the full prompt
-        prompt = f"""Analyze the sentiment of these social media posts. For each post, provide:
-1. Sentiment classification (positive, negative, or neutral)
-2. Sentiment intensity score from -1.0 (very negative) to 1.0 (very positive)
-3. Confidence level from 0.0 to 1.0
+        # Construct minimal prompt commanding array of scores only
+        num_posts = len(posts)
+        prompt = f"""Analyze sentiment for these {num_posts} texts. Return array of {num_posts} scores.
 
-Posts:
-{posts_section}
+Texts: {posts_json}
 
-Return results as a JSON array with this exact format:
-[
-  {{
-    "post_id": "...",
-    "sentiment": "positive|negative|neutral",
-    "score": <float between -1.0 and 1.0>,
-    "confidence": <float between 0.0 and 1.0>
-  }}
-]
+Return JSON array of {num_posts} numbers from -1.0 to 1.0:
+- -1.0 = very negative
+- 0.0 = neutral  
+- 1.0 = very positive
 
-Important:
-- Analyze each post independently
-- Use "positive" for optimistic/favorable content
-- Use "negative" for pessimistic/critical content
-- Use "neutral" for factual/balanced content
-- Score should reflect intensity: -1.0 (very negative) to 1.0 (very positive)
-- Confidence should reflect certainty of classification
+CRITICAL: Return EXACTLY {num_posts} numbers in same order as texts.
+Return ONLY the JSON array, nothing else.
 
-Return ONLY the JSON array, no additional text."""
+Example: {json.dumps([0.0] * min(num_posts, 3))}"""
         
         return prompt
     
@@ -380,12 +367,12 @@ Return ONLY the JSON array, no additional text."""
         """
         Parse Bedrock response into SentimentResult objects.
         
-        Extracts the JSON array from the model's response and converts each
-        entry into a validated SentimentResult object.
+        Correlates results by array index since we send texts without IDs.
+        Expects a simple array of numeric scores from the model.
         
         Args:
             response: Raw response from Bedrock API
-            posts: Original posts (for validation)
+            posts: Original posts (for correlation by index)
             
         Returns:
             List of SentimentResult objects
@@ -414,7 +401,6 @@ Return ONLY the JSON array, no additional text."""
             text = content['text'].strip()
             
             # Extract JSON array from the text
-            # The model might include markdown code blocks, so we need to extract the JSON
             json_text = self._extract_json(text)
             
             # Parse the JSON array
@@ -423,27 +409,77 @@ Return ONLY the JSON array, no additional text."""
             if not isinstance(sentiment_data, list):
                 raise ValueError(f"Expected JSON array, got {type(sentiment_data)}")
             
-            # Convert to SentimentResult objects
+            # Handle count mismatch by padding with neutral scores if needed
+            expected_count = len(posts)
+            actual_count = len(sentiment_data)
+            
+            if actual_count < expected_count:
+                logger.warning(
+                    f"Model returned {actual_count} scores but expected {expected_count}. "
+                    f"Padding with neutral scores (0.0) for missing results."
+                )
+                # Pad with neutral scores for missing posts
+                sentiment_data.extend([0.0] * (expected_count - actual_count))
+            elif actual_count > expected_count:
+                logger.warning(
+                    f"Model returned {actual_count} scores but expected {expected_count}. "
+                    f"Truncating extra results."
+                )
+                # Truncate extra scores
+                sentiment_data = sentiment_data[:expected_count]
+            
+            # Correlate results by index with original posts
             results = []
-            for item in sentiment_data:
+            for idx, score in enumerate(sentiment_data):
                 try:
+                    # Validate index is within bounds
+                    if idx >= len(posts):
+                        logger.warning(f"Result index {idx} exceeds post count {len(posts)}")
+                        break
+                    
+                    # Get corresponding post by index
+                    post = posts[idx]
+                    
+                    # Convert score to float
+                    score_value = float(score)
+                    
+                    # Clamp score to valid range
+                    score_value = max(-1.0, min(1.0, score_value))
+                    
+                    # Determine sentiment category from score
+                    if score_value > 0.1:
+                        sentiment = "positive"
+                    elif score_value < -0.1:
+                        sentiment = "negative"
+                    else:
+                        sentiment = "neutral"
+                    
+                    # Create SentimentResult with post_id from original post
                     result = SentimentResult(
-                        post_id=item['post_id'],
-                        sentiment=item['sentiment'],
-                        sentiment_score=float(item['score']),
-                        confidence=float(item['confidence']),
+                        post_id=post.id,
+                        sentiment=sentiment,
+                        sentiment_score=score_value,
+                        confidence=1.0,  # Default confidence since we don't get it from model
                         timestamp=datetime.utcnow()
                     )
                     results.append(result)
-                except (KeyError, ValueError, TypeError) as e:
-                    logger.warning(f"Failed to parse sentiment item: {item}. Error: {e}")
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Failed to parse sentiment score at index {idx}: {score}. Error: {e}. Using neutral score.")
+                    # Add neutral result for failed parsing
+                    if idx < len(posts):
+                        post = posts[idx]
+                        result = SentimentResult(
+                            post_id=post.id,
+                            sentiment="neutral",
+                            sentiment_score=0.0,
+                            confidence=0.5,  # Lower confidence for fallback
+                            timestamp=datetime.utcnow()
+                        )
+                        results.append(result)
                     continue
             
-            # Validate we got results for all posts
-            if len(results) != len(posts):
-                logger.warning(
-                    f"Result count mismatch: expected {len(posts)}, got {len(results)}"
-                )
+            # Log final result count
+            logger.info(f"Successfully created {len(results)} sentiment results from {len(posts)} posts")
             
             return results
             
