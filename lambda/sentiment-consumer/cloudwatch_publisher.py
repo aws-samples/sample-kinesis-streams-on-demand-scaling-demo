@@ -52,6 +52,21 @@ class CloudWatchPublisher:
         if not self.metrics_client:
             return
         
+        def sanitize_dimension_value(value: str) -> str:
+            """
+            Sanitize dimension value for CloudWatch (ASCII only, max 255 chars).
+            
+            Args:
+                value: Original dimension value
+                
+            Returns:
+                Sanitized ASCII-only string
+            """
+            # Remove non-ASCII characters
+            ascii_value = value.encode('ascii', 'ignore').decode('ascii')
+            # Truncate to CloudWatch limit
+            return ascii_value[:255] if ascii_value else 'unknown'
+        
         try:
             from datetime import datetime
             
@@ -130,7 +145,7 @@ class CloudWatchPublisher:
                         'Timestamp': timestamp,
                         'Dimensions': [
                             {'Name': 'Environment', 'Value': self.environment},
-                            {'Name': 'Product', 'Value': insight.product_name[:255]}  # CloudWatch dimension limit
+                            {'Name': 'Product', 'Value': sanitize_dimension_value(insight.product_name)}
                         ]
                     })
             
@@ -157,7 +172,7 @@ class CloudWatchPublisher:
                         'Timestamp': timestamp,
                         'Dimensions': [
                             {'Name': 'Environment', 'Value': self.environment},
-                            {'Name': 'Hashtag', 'Value': insight.hashtag[:255]}
+                            {'Name': 'Hashtag', 'Value': sanitize_dimension_value(insight.hashtag)}
                         ]
                     })
             
@@ -198,8 +213,8 @@ class CloudWatchPublisher:
                         'Timestamp': timestamp,
                         'Dimensions': [
                             {'Name': 'Environment', 'Value': self.environment},
-                            {'Name': 'Country', 'Value': geo_insight.country[:255]},
-                            {'Name': 'City', 'Value': geo_insight.city[:255]}
+                            {'Name': 'Country', 'Value': sanitize_dimension_value(geo_insight.country)},
+                            {'Name': 'City', 'Value': sanitize_dimension_value(geo_insight.city)}
                         ]
                     })
             

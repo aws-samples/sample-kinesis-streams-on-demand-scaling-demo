@@ -1209,7 +1209,7 @@ def lambda_handler(event, context):
             stacked: true,
             region: this.region,
             title: "Sentiment Distribution Over Time",
-            period: 300,
+            period: 60,
             yAxis: {
               left: {
                 label: "Post Count"
@@ -1249,7 +1249,7 @@ def lambda_handler(event, context):
             view: "singleValue",
             region: this.region,
             title: "Average Sentiment Score",
-            period: 300,
+            period: 60,
             setPeriodToTimeRange: false
           }
         },
@@ -1266,7 +1266,7 @@ def lambda_handler(event, context):
             view: "timeSeries",
             region: this.region,
             title: "Sentiment Score Trend",
-            period: 300,
+            period: 60,
             yAxis: {
               left: {
                 min: -1,
@@ -1298,7 +1298,7 @@ def lambda_handler(event, context):
             view: "timeSeries",
             region: this.region,
             title: "Trending Topics Count",
-            period: 300,
+            period: 60,
             yAxis: {
               left: {
                 label: "Count"
@@ -1319,7 +1319,7 @@ def lambda_handler(event, context):
             view: "timeSeries",
             region: this.region,
             title: "Engagement-Sentiment Correlation",
-            period: 300,
+            period: 60,
             yAxis: {
               left: {
                 min: -1,
@@ -1342,7 +1342,7 @@ def lambda_handler(event, context):
             view: "timeSeries",
             region: this.region,
             title: "Controversial Posts (High Engagement, Negative Sentiment)",
-            period: 300,
+            period: 60,
             yAxis: {
               left: {
                 label: "Count"
@@ -1363,7 +1363,7 @@ def lambda_handler(event, context):
             view: "timeSeries",
             region: this.region,
             title: "Product Sentiment Scores",
-            period: 300,
+            period: 60,
             yAxis: {
               left: {
                 min: -1,
@@ -1386,7 +1386,7 @@ def lambda_handler(event, context):
             view: "timeSeries",
             region: this.region,
             title: "Hashtag Post Counts",
-            period: 300,
+            period: 60,
             yAxis: {
               left: {
                 label: "Post Count"
@@ -1407,7 +1407,7 @@ def lambda_handler(event, context):
             view: "timeSeries",
             region: this.region,
             title: "Geographic Sentiment by Location",
-            period: 300,
+            period: 60,
             yAxis: {
               left: {
                 min: -1,
@@ -1431,7 +1431,7 @@ def lambda_handler(event, context):
             view: "timeSeries",
             region: this.region,
             title: "Lambda Performance",
-            period: 300
+            period: 60
           }
         },
         {
@@ -1448,7 +1448,7 @@ def lambda_handler(event, context):
             view: "timeSeries",
             region: this.region,
             title: "Processing Metrics",
-            period: 300,
+            period: 60,
             yAxis: {
               left: {
                 label: "Error Rate (%)"
