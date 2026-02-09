@@ -549,10 +549,10 @@ def lambda_handler(event, context):
         operation: 'initialize_demo',
         demo_config: {
           phases: [
-            { phase_number: 1, target_tps: 10000, duration_seconds: 120 },
-            { phase_number: 2, target_tps: 100000, duration_seconds: 120 },
-            { phase_number: 3, target_tps: 500000, duration_seconds: 120 },
-            { phase_number: 4, target_tps: 10000, duration_seconds: 120 },
+            { phase_number: 1, target_tps: 10000, duration_seconds: 300 },
+            { phase_number: 2, target_tps: 100000, duration_seconds: 300 },
+            { phase_number: 3, target_tps: 500000, duration_seconds: 300 },
+            { phase_number: 4, target_tps: 10000, duration_seconds: 300 },
           ],
         },
       }),
@@ -573,7 +573,7 @@ def lambda_handler(event, context):
     });
 
     const waitPhase1 = new stepfunctions.Wait(this, 'WaitPhase1Duration', {
-      time: stepfunctions.WaitTime.duration(cdk.Duration.seconds(600)),
+      time: stepfunctions.WaitTime.duration(cdk.Duration.seconds(300)),
     });
 
     const startPhase2 = new sfnTasks.LambdaInvoke(this, 'StartPhase2', {
@@ -589,7 +589,7 @@ def lambda_handler(event, context):
     });
 
     const waitPhase2 = new stepfunctions.Wait(this, 'WaitPhase2Duration', {
-      time: stepfunctions.WaitTime.duration(cdk.Duration.seconds(1200)),
+      time: stepfunctions.WaitTime.duration(cdk.Duration.seconds(300)),
     });
 
     const startPhase3 = new sfnTasks.LambdaInvoke(this, 'StartPhase3', {
@@ -605,7 +605,7 @@ def lambda_handler(event, context):
     });
 
     const waitPhase3 = new stepfunctions.Wait(this, 'WaitPhase3Duration', {
-      time: stepfunctions.WaitTime.duration(cdk.Duration.seconds(1200)),
+      time: stepfunctions.WaitTime.duration(cdk.Duration.seconds(300)),
     });
 
     const startPhase4 = new sfnTasks.LambdaInvoke(this, 'StartPhase4', {
@@ -621,7 +621,7 @@ def lambda_handler(event, context):
     });
 
     const waitPhase4 = new stepfunctions.Wait(this, 'WaitPhase4Duration', {
-      time: stepfunctions.WaitTime.duration(cdk.Duration.seconds(600)),
+      time: stepfunctions.WaitTime.duration(cdk.Duration.seconds(300)),
     });
 
     const cleanupDemo = new sfnTasks.LambdaInvoke(this, 'CleanupDemo', {
@@ -663,7 +663,7 @@ def lambda_handler(event, context):
     const stateMachine = new stepfunctions.StateMachine(this, 'DemoStateMachine', {
       stateMachineName: `kinesis-demo-${environment}`,
       definitionBody: stepfunctions.DefinitionBody.fromChainable(definition),
-      timeout: cdk.Duration.minutes(90),
+      timeout: cdk.Duration.minutes(30),
       tracingEnabled: true, // Enable X-Ray tracing
       logs: {
         destination: stepFunctionsLogGroup,
@@ -1187,7 +1187,7 @@ def lambda_handler(event, context):
             height: 6,
             properties: {
                 metrics: [
-                    [ "AWS/Bedrock", "Invocations", "ModelId", "amazon.nova-lite-v1:0", { "id": "m1" } ],
+                    [ "AWS/Bedrock", "Invocations", "ModelId", "us.amazon.nova-lite-v1:0", { "id": "m1" } ],
                     [ ".", "InvocationThrottles", ".", ".", { "id": "m2" } ]
                 ],
                 view: "timeSeries",
