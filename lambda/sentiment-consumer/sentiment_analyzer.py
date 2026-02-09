@@ -156,7 +156,7 @@ class SentimentAnalyzer:
     def __init__(
         self, 
         bedrock_client, 
-        model_id: str = "amazon.nova-lite-v1:0",
+        model_id: str = "us.amazon.nova-lite-v1:0",
         max_retries: int = 3
     ):
         """

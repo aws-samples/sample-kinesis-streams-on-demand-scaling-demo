@@ -42,8 +42,9 @@ def get_bedrock_client():
     """Get or create Bedrock Runtime client."""
     global bedrock_client
     if bedrock_client is None:
-        bedrock_region = os.environ.get('BEDROCK_REGION', 'us-east-1')
+        bedrock_region = os.environ.get('BEDROCK_REGION', 'us-west-2')
         bedrock_client = boto3.client('bedrock-runtime', region_name=bedrock_region)
+        logger.info(f"Initialized Bedrock client in region: {bedrock_region}")
     return bedrock_client
 def get_cloudwatch_metrics_client():
     """Get or create CloudWatch Metrics client."""
@@ -79,7 +80,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     logger.info(f"Starting sentiment analysis batch processing. Batch ID: {batch_id}")
     
     # Extract configuration from environment
-    model_id = os.environ.get('BEDROCK_MODEL_ID', 'amazon.nova-lite-v1:0')
+    model_id = os.environ.get('BEDROCK_MODEL_ID', 'us.amazon.nova-lite-v1:0')
     demo_phase = int(os.environ.get('DEMO_PHASE', '0'))
     environment = os.environ.get('ENVIRONMENT', 'dev')
     

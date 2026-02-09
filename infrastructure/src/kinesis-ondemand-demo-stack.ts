@@ -2,13 +2,14 @@ import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as iam from 'aws-cdk-lib/aws-iam';
-
+import * as kinesis from 'aws-cdk-lib/aws-kinesis';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
 import * as sfnTasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
+import { NagSuppressions } from 'cdk-nag';
 
 import { Construct } from 'constructs';
 import * as path from 'path';
@@ -19,8 +20,7 @@ export interface KinesisOnDemandDemoStackProps extends cdk.StackProps {
 }
 
 export class KinesisOnDemandDemoStack extends cdk.Stack {
-  // Note: Kinesis stream created by demo-manager.sh, not CDK
-  // public readonly kinesisStream: kinesis.Stream;
+  public readonly kinesisStream: kinesis.Stream;
   public readonly ecsCluster: ecs.Cluster;
   public readonly ecsService: ecs.FargateService;
   public readonly stepFunctionsStateMachine: stepfunctions.StateMachine;
@@ -36,8 +36,8 @@ export class KinesisOnDemandDemoStack extends cdk.Stack {
     // Use default VPC for ECS deployment
     const vpc = this.createVpc();
 
-    // Note: Kinesis stream will be created by demo-manager.sh
-    // this.kinesisStream = this.createKinesisStream(environment);
+    // Create Kinesis stream in CDK (demo-manager.sh can delete/recreate it later)
+    this.kinesisStream = this.createKinesisStream(environment);
 
     // Create ECS Cluster and related resources
     const { cluster, service, taskDefinition } = this.createEcsResources(vpc, environment);
@@ -85,16 +85,17 @@ export class KinesisOnDemandDemoStack extends cdk.Stack {
     });
   }
 
-  // Kinesis stream creation moved to demo-manager.sh
-  // private createKinesisStream(environment: string): kinesis.Stream {
-  //   return new kinesis.Stream(this, 'SocialMediaStream', {
-  //     streamName: `social-media-stream-${environment}`,
-  //     retentionPeriod: cdk.Duration.hours(24),
-  //     encryption: kinesis.StreamEncryption.MANAGED,
-  //     // Use On-Demand capacity mode for automatic scaling
-  //     streamMode: kinesis.StreamMode.ON_DEMAND,
-  //   });
-  // }
+  private createKinesisStream(environment: string): kinesis.Stream {
+    // Create Kinesis stream with On-Demand capacity mode
+    // Note: demo-manager.sh can delete and recreate this stream to reset shard count
+    return new kinesis.Stream(this, 'SocialMediaStream', {
+      streamName: `social-media-stream-${environment}`,
+      retentionPeriod: cdk.Duration.hours(24),
+      encryption: kinesis.StreamEncryption.MANAGED,
+      // Use On-Demand capacity mode for automatic scaling
+      streamMode: kinesis.StreamMode.ON_DEMAND,
+    });
+  }
 
   private createEcsResources(vpc: ec2.IVpc, environment: string) {
     // Create ECS Cluster
@@ -548,10 +549,10 @@ def lambda_handler(event, context):
         operation: 'initialize_demo',
         demo_config: {
           phases: [
-            { phase_number: 1, target_tps: 10000, duration_seconds: 600 },
-            { phase_number: 2, target_tps: 100000, duration_seconds: 1200 },
-            { phase_number: 3, target_tps: 500000, duration_seconds: 1200 },
-            { phase_number: 4, target_tps: 10000, duration_seconds: 600 },
+            { phase_number: 1, target_tps: 10000, duration_seconds: 120 },
+            { phase_number: 2, target_tps: 100000, duration_seconds: 120 },
+            { phase_number: 3, target_tps: 500000, duration_seconds: 120 },
+            { phase_number: 4, target_tps: 10000, duration_seconds: 120 },
           ],
         },
       }),
@@ -772,7 +773,14 @@ def lambda_handler(event, context):
                 'bedrock:InvokeModel',
               ],
               resources: [
-                `arn:aws:bedrock:${this.region}::foundation-model/amazon.nova-lite-v1:0`
+                // Allow inference profile to route to any of the three US regions
+                'arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0',
+                'arn:aws:bedrock:us-west-2::foundation-model/amazon.nova-lite-v1:0',
+                'arn:aws:bedrock:us-east-2::foundation-model/amazon.nova-lite-v1:0',
+                // Also allow inference profiles in all three regions
+                'arn:aws:bedrock:us-east-1:*:inference-profile/*',
+                'arn:aws:bedrock:us-west-2:*:inference-profile/*',
+                'arn:aws:bedrock:us-east-2:*:inference-profile/*'
               ],
             }),
           ],
@@ -808,6 +816,19 @@ def lambda_handler(event, context):
         }),
       },
     });
+
+    // Add CDK-nag suppression for Bedrock inference profile wildcard
+    NagSuppressions.addResourceSuppressions(
+      sentimentConsumerRole,
+      [
+        {
+          id: 'AwsSolutions-IAM5',
+          reason: 'Bedrock inference profiles require wildcard in account ID portion of ARN. This is scoped to inference-profile resource type in the deployment region only.',
+          appliesTo: [`Resource::arn:aws:bedrock:${this.region}:*:inference-profile/*`],
+        },
+      ],
+      true // applyToChildren
+    );
 
     // Create Lambda function with inline code deployment
     // CDK will automatically bundle the Lambda code and shared utilities
@@ -861,7 +882,8 @@ def lambda_handler(event, context):
       timeout: cdk.Duration.minutes(10), // Increased for larger batches (10K records)
       memorySize: 2048, // Increased memory for processing 10K records per batch
       environment: {
-        BEDROCK_MODEL_ID: 'amazon.nova-lite-v1:0',
+        // Use inference profile ID - it will route to us-east-1, us-west-2, or us-east-2
+        BEDROCK_MODEL_ID: 'us.amazon.nova-lite-v1:0',
         BEDROCK_REGION: this.region,
         LOG_GROUP_NAME: `/aws/lambda/sentiment-analysis-consumer-${environment}`,
         INSIGHTS_LOG_GROUP_NAME: `/aws/lambda/sentiment-analysis-consumer-${environment}/insights`,
@@ -1170,7 +1192,7 @@ def lambda_handler(event, context):
                 ],
                 view: "timeSeries",
                 stacked: false,
-                region: "us-east-1",
+                region: this.region,
                 stat: "Sum",
                 period: 60,
                 title: "Bedrock API Invocation"
@@ -1494,8 +1516,8 @@ def lambda_handler(event, context):
 
   private createOutputs(environment: string, sentimentConsumerFunction?: lambda.Function) {
     new cdk.CfnOutput(this, 'KinesisStreamName', {
-      value: `social-media-stream-${environment}`,
-      description: 'Name of the Kinesis Data Stream (created by demo-manager.sh)',
+      value: this.kinesisStream.streamName,
+      description: 'Name of the Kinesis Data Stream',
       exportName: `${this.stackName}-KinesisStreamName`,
     });
 

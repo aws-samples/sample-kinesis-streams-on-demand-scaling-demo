@@ -23,7 +23,7 @@ export function addSecuritySuppressions(stack: Stack) {
   NagSuppressions.addStackSuppressions(stack, [
     {
       id: 'AwsSolutions-IAM5',
-      reason: 'Comprehensive suppression for acceptable wildcard permissions in this demo: ECR GetAuthorizationToken (AWS requirement), CloudWatch PutMetricData (restricted by namespace), X-Ray tracing, CloudWatch Logs, ECS task management, Lambda function qualifiers, and Sentiment Consumer log streams. All wildcards are either AWS service requirements or appropriately scoped for demo functionality.',
+      reason: 'Comprehensive suppression for acceptable wildcard permissions in this demo: ECR GetAuthorizationToken (AWS requirement), CloudWatch PutMetricData (restricted by namespace), X-Ray tracing, CloudWatch Logs, ECS task management, Lambda function qualifiers, Bedrock inference profiles (cross-region routing to us-east-1, us-west-2, us-east-2), and Sentiment Consumer log streams. All wildcards are either AWS service requirements or appropriately scoped for demo functionality.',
       appliesTo: [
         'Resource::*',
         `Resource::arn:aws:ecr:${region}:${account}:repository/kinesis-ondemand-demo*`,
@@ -33,6 +33,9 @@ export function addSecuritySuppressions(stack: Stack) {
         `Resource::arn:aws:logs:${region}:${account}:log-group:/aws/lambda/sentiment-analysis-consumer-production/insights:*`,
         `Resource::arn:aws:ecs:${region}:${account}:task-definition/*`,
         `Resource::arn:aws:ecs:${region}:${account}:task/<DemoCluster8CB095E3>/*`,
+        'Resource::arn:aws:bedrock:us-east-1:*:inference-profile/*',
+        'Resource::arn:aws:bedrock:us-west-2:*:inference-profile/*',
+        'Resource::arn:aws:bedrock:us-east-2:*:inference-profile/*',
         'Resource::<StepFunctionsController286FB483.Arn>:*'
       ]
     }
