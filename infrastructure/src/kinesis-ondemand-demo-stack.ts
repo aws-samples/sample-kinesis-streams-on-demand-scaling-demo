@@ -211,7 +211,7 @@ export class KinesisOnDemandDemoStack extends cdk.Stack {
       environment: {
         AWS_REGION: this.region,
         STREAM_NAME: `social-media-stream-${environment}`,
-        TARGET_TPS: '5000',
+        TARGET_TPS: '1000',
         DEMO_PHASE: '1',
         CLOUDWATCH_NAMESPACE: `KinesisOnDemandDemo/${environment}`,
         ENVIRONMENT: environment,
@@ -549,10 +549,10 @@ def lambda_handler(event, context):
         operation: 'initialize_demo',
         demo_config: {
           phases: [
-            { phase_number: 1, target_tps: 10000, duration_seconds: 300 },
-            { phase_number: 2, target_tps: 100000, duration_seconds: 300 },
-            { phase_number: 3, target_tps: 500000, duration_seconds: 300 },
-            { phase_number: 4, target_tps: 10000, duration_seconds: 300 },
+            { phase_number: 1, target_tps: 1000, duration_seconds: 300 },
+            { phase_number: 2, target_tps: 10000, duration_seconds: 300 },
+            { phase_number: 3, target_tps: 50000, duration_seconds: 300 },
+            { phase_number: 4, target_tps: 1000, duration_seconds: 300 },
           ],
         },
       }),
@@ -565,7 +565,7 @@ def lambda_handler(event, context):
       payload: stepfunctions.TaskInput.fromObject({
         operation: 'start_phase',
         phase_number: 1,
-        target_tps: 10000,
+        target_tps: 1000,
         'demo_state.$': '$.demo_state.Payload.demo_state',
       }),
       resultPath: '$.phase1_result',
@@ -581,7 +581,7 @@ def lambda_handler(event, context):
       payload: stepfunctions.TaskInput.fromObject({
         operation: 'start_phase',
         phase_number: 2,
-        target_tps: 100000,
+        target_tps: 10000,
         'demo_state.$': '$.phase1_result.Payload.demo_state',
       }),
       resultPath: '$.phase2_result',
@@ -597,7 +597,7 @@ def lambda_handler(event, context):
       payload: stepfunctions.TaskInput.fromObject({
         operation: 'start_phase',
         phase_number: 3,
-        target_tps: 500000,
+        target_tps: 50000,
         'demo_state.$': '$.phase2_result.Payload.demo_state',
       }),
       resultPath: '$.phase3_result',
@@ -613,7 +613,7 @@ def lambda_handler(event, context):
       payload: stepfunctions.TaskInput.fromObject({
         operation: 'start_phase',
         phase_number: 4,
-        target_tps: 10000,
+        target_tps: 1000,
         'demo_state.$': '$.phase3_result.Payload.demo_state',
       }),
       resultPath: '$.phase4_result',

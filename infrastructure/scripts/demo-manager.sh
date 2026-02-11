@@ -450,6 +450,157 @@ setup_ecs_service() {
     fi
 }
 
+# Check and enable Event Source Mapping between Kinesis and Sentiment Consumer Lambda
+setup_sentiment_consumer_esm() {
+    local stream_name="social-media-stream-${ENVIRONMENT}"
+    local function_name="sentiment-analysis-consumer-${ENVIRONMENT}"
+    
+    log_info "Checking Event Source Mapping for sentiment analysis consumer..."
+    
+    # Get the stream ARN
+    local stream_arn=$(aws kinesis describe-stream \
+        --stream-name "$stream_name" \
+        --region "$AWS_REGION" \
+        --query 'StreamDescription.StreamARN' \
+        --output text 2>/dev/null | head -n 1 | tr -d '\n\r')
+    
+    if [[ -z "$stream_arn" || "$stream_arn" == "None" ]]; then
+        log_error "Cannot find Kinesis stream: $stream_name"
+        return 1
+    fi
+    
+    # Check if Lambda function exists
+    local function_arn=$(aws lambda get-function \
+        --function-name "$function_name" \
+        --region "$AWS_REGION" \
+        --query 'Configuration.FunctionArn' \
+        --output text 2>/dev/null | head -n 1 | tr -d '\n\r')
+    
+    if [[ -z "$function_arn" || "$function_arn" == "None" ]]; then
+        log_warning "Sentiment consumer Lambda not found: $function_name"
+        log_info "Skipping ESM setup (Lambda may not be deployed yet)"
+        return 0
+    fi
+    
+    # Check if ESM already exists
+    local esm_uuid=$(aws lambda list-event-source-mappings \
+        --function-name "$function_name" \
+        --event-source-arn "$stream_arn" \
+        --region "$AWS_REGION" \
+        --query 'EventSourceMappings[0].UUID' \
+        --output text 2>/dev/null | head -n 1 | tr -d '\n\r')
+    
+    if [[ -n "$esm_uuid" && "$esm_uuid" != "None" ]]; then
+        # ESM exists, check if it's enabled
+        local esm_info=$(aws lambda get-event-source-mapping \
+            --uuid "$esm_uuid" \
+            --region "$AWS_REGION" \
+            --output json 2>/dev/null)
+        
+        local esm_state=$(echo "$esm_info" | jq -r '.State' | tr -d '\n\r')
+        local esm_transition_reason=$(echo "$esm_info" | jq -r '.StateTransitionReason // "none"' | tr -d '\n\r')
+        
+        if [[ "$esm_state" == "Enabled" ]]; then
+            log_success "Event Source Mapping already enabled (UUID: $esm_uuid)"
+            return 0
+        elif [[ "$esm_transition_reason" == "Unrecoverable error" ]]; then
+            log_warning "Event Source Mapping has unrecoverable error (stream was likely recreated)"
+            log_info "Deleting old ESM and creating new one..."
+            
+            # Delete the old ESM
+            aws lambda delete-event-source-mapping \
+                --uuid "$esm_uuid" \
+                --region "$AWS_REGION" >/dev/null 2>&1
+            
+            if [[ $? -eq 0 ]]; then
+                log_success "Old Event Source Mapping deleted"
+                
+                # Wait a moment for deletion to complete
+                sleep 2
+                
+                # Create new ESM (fall through to creation logic below)
+                esm_uuid=""
+            else
+                log_error "Failed to delete old Event Source Mapping"
+                return 1
+            fi
+        elif [[ "$esm_state" == "Disabled" ]]; then
+            log_info "Event Source Mapping is disabled, enabling it..."
+            
+            local update_result=$(aws lambda update-event-source-mapping \
+                --uuid "$esm_uuid" \
+                --enabled \
+                --region "$AWS_REGION" \
+                --output json 2>&1)
+            
+            local update_exit_code=$?
+            
+            if [[ $update_exit_code -eq 0 ]]; then
+                # Verify it's valid JSON before parsing
+                if echo "$update_result" | jq empty 2>/dev/null; then
+                    log_success "Event Source Mapping enabled successfully"
+                    local new_state=$(echo "$update_result" | jq -r '.State // "unknown"')
+                    echo "  State: $new_state"
+                    echo "  UUID: $esm_uuid"
+                    return 0
+                else
+                    log_error "Received invalid JSON response from AWS CLI"
+                    log_error "Response: $update_result"
+                    return 1
+                fi
+            else
+                log_error "Failed to enable Event Source Mapping"
+                log_error "Error: $update_result"
+                return 1
+            fi
+        else
+            log_warning "Event Source Mapping in state: $esm_state"
+            log_info "Waiting for ESM to stabilize..."
+            return 0
+        fi
+    fi
+    
+    # Create new ESM if it doesn't exist or was deleted above
+    if [[ -z "$esm_uuid" || "$esm_uuid" == "None" ]]; then
+        # ESM doesn't exist, create it
+        log_info "Creating Event Source Mapping..."
+        
+        local create_result=$(aws lambda create-event-source-mapping \
+            --function-name "$function_name" \
+            --event-source-arn "$stream_arn" \
+            --starting-position LATEST \
+            --batch-size 500 \
+            --maximum-batching-window-in-seconds 5 \
+            --parallelization-factor 1 \
+            --region "$AWS_REGION" \
+            --output json 2>&1)
+        
+        local create_exit_code=$?
+        
+        if [[ $create_exit_code -eq 0 ]]; then
+            # Verify it's valid JSON before parsing
+            if echo "$create_result" | jq empty 2>/dev/null; then
+                log_success "Event Source Mapping created successfully"
+                local new_uuid=$(echo "$create_result" | jq -r '.UUID // "unknown"')
+                local new_state=$(echo "$create_result" | jq -r '.State // "unknown"')
+                echo "  UUID: $new_uuid"
+                echo "  State: $new_state"
+                echo "  Batch Size: 500"
+                echo "  Starting Position: LATEST"
+                return 0
+            else
+                log_error "Received invalid JSON response from AWS CLI"
+                log_error "Response: $create_result"
+                return 1
+            fi
+        else
+            log_error "Failed to create Event Source Mapping"
+            log_error "Error: $create_result"
+            return 1
+        fi
+    fi
+}
+
 # Start new demo execution
 cmd_start() {
     log_info "Starting new Kinesis On-Demand Demo..."
@@ -488,8 +639,18 @@ cmd_start() {
             log_error "Failed to setup ECS service"
             return 1
         fi
+        
+        # Step 3: Setup Sentiment Consumer Event Source Mapping
+        if ! setup_sentiment_consumer_esm; then
+            log_warning "Failed to setup sentiment consumer ESM (continuing anyway)"
+        fi
     else
         log_info "Infrastructure already active, proceeding with demo execution..."
+        
+        # Check and enable ESM even if infrastructure exists
+        if ! setup_sentiment_consumer_esm; then
+            log_warning "Failed to setup sentiment consumer ESM (continuing anyway)"
+        fi
         
         # If warm throughput is requested and stream exists, update it
         if [[ -n "$WARM_THROUGHPUT_MIBPS" ]]; then
@@ -1118,6 +1279,11 @@ cmd_setup() {
         return 1
     fi
     
+    # Step 3: Setup Sentiment Consumer Event Source Mapping
+    if ! setup_sentiment_consumer_esm; then
+        log_warning "Failed to setup sentiment consumer ESM (continuing anyway)"
+    fi
+    
     echo ""
     log_success "Infrastructure setup complete:"
     echo "  • Kinesis stream: social-media-stream-${ENVIRONMENT}"
@@ -1125,6 +1291,7 @@ cmd_setup() {
         echo "  • Warm throughput: ${WARM_THROUGHPUT_MIBPS} MB/s"
     fi
     echo "  • ECS service: ${SERVICE_NAME} (1 task running)"
+    echo "  • Sentiment consumer: Event Source Mapping configured"
     echo ""
     echo "Ready to start demo execution with: $0 start"
 }
