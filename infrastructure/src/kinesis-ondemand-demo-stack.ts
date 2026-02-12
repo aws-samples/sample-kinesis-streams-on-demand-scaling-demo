@@ -881,6 +881,9 @@ def lambda_handler(event, context):
       layers: [dependenciesLayer],
       timeout: cdk.Duration.minutes(10), // Increased for larger batches (10K records)
       memorySize: 2048, // Increased memory for processing 10K records per batch
+      // Set reserved concurrency to limit max concurrent executions
+      // This prevents the function from consuming all account concurrency
+      reservedConcurrentExecutions: 50, // Adjust based on your needs
       environment: {
         // Use inference profile ID - it will route to us-east-1, us-west-2, or us-east-2
         BEDROCK_MODEL_ID: 'us.amazon.nova-lite-v1:0',
