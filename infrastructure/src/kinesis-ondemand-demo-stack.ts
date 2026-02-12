@@ -2,13 +2,14 @@ import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as iam from 'aws-cdk-lib/aws-iam';
-
+import * as kinesis from 'aws-cdk-lib/aws-kinesis';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
 import * as sfnTasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
+import { NagSuppressions } from 'cdk-nag';
 
 import { Construct } from 'constructs';
 import * as path from 'path';
@@ -19,13 +20,13 @@ export interface KinesisOnDemandDemoStackProps extends cdk.StackProps {
 }
 
 export class KinesisOnDemandDemoStack extends cdk.Stack {
-  // Note: Kinesis stream created by demo-manager.sh, not CDK
-  // public readonly kinesisStream: kinesis.Stream;
+  public readonly kinesisStream: kinesis.Stream;
   public readonly ecsCluster: ecs.Cluster;
   public readonly ecsService: ecs.FargateService;
   public readonly stepFunctionsStateMachine: stepfunctions.StateMachine;
 
   public readonly dashboard: cloudwatch.CfnDashboard;
+  public readonly sentimentDashboard: cloudwatch.CfnDashboard;
 
   constructor(scope: Construct, id: string, props: KinesisOnDemandDemoStackProps) {
     super(scope, id, props);
@@ -35,8 +36,8 @@ export class KinesisOnDemandDemoStack extends cdk.Stack {
     // Use default VPC for ECS deployment
     const vpc = this.createVpc();
 
-    // Note: Kinesis stream will be created by demo-manager.sh
-    // this.kinesisStream = this.createKinesisStream(environment);
+    // Create Kinesis stream in CDK (demo-manager.sh can delete/recreate it later)
+    this.kinesisStream = this.createKinesisStream(environment);
 
     // Create ECS Cluster and related resources
     const { cluster, service, taskDefinition } = this.createEcsResources(vpc, environment);
@@ -56,14 +57,20 @@ export class KinesisOnDemandDemoStack extends cdk.Stack {
 
 
 
+    // Create Sentiment Analysis Consumer Lambda
+    const sentimentConsumerFunction = this.createSentimentAnalysisConsumer(environment);
+
     // Create CloudWatch Dashboard
     this.dashboard = this.createCloudWatchDashboard(environment);
+    
+    // Create Sentiment Analysis Dashboard
+    this.sentimentDashboard = this.createSentimentAnalysisDashboard(environment);
 
     // Create CloudWatch Log Groups with retention policies
     this.createLogGroups(environment);
 
     // Output important resource information
-    this.createOutputs(environment);
+    this.createOutputs(environment, sentimentConsumerFunction);
 
     // Apply security suppressions
     addSecuritySuppressions(this);
@@ -78,16 +85,17 @@ export class KinesisOnDemandDemoStack extends cdk.Stack {
     });
   }
 
-  // Kinesis stream creation moved to demo-manager.sh
-  // private createKinesisStream(environment: string): kinesis.Stream {
-  //   return new kinesis.Stream(this, 'SocialMediaStream', {
-  //     streamName: `social-media-stream-${environment}`,
-  //     retentionPeriod: cdk.Duration.hours(24),
-  //     encryption: kinesis.StreamEncryption.MANAGED,
-  //     // Use On-Demand capacity mode for automatic scaling
-  //     streamMode: kinesis.StreamMode.ON_DEMAND,
-  //   });
-  // }
+  private createKinesisStream(environment: string): kinesis.Stream {
+    // Create Kinesis stream with On-Demand capacity mode
+    // Note: demo-manager.sh can delete and recreate this stream to reset shard count
+    return new kinesis.Stream(this, 'SocialMediaStream', {
+      streamName: `social-media-stream-${environment}`,
+      retentionPeriod: cdk.Duration.hours(24),
+      encryption: kinesis.StreamEncryption.MANAGED,
+      // Use On-Demand capacity mode for automatic scaling
+      streamMode: kinesis.StreamMode.ON_DEMAND,
+    });
+  }
 
   private createEcsResources(vpc: ec2.IVpc, environment: string) {
     // Create ECS Cluster
@@ -203,7 +211,7 @@ export class KinesisOnDemandDemoStack extends cdk.Stack {
       environment: {
         AWS_REGION: this.region,
         STREAM_NAME: `social-media-stream-${environment}`,
-        TARGET_TPS: '5000',
+        TARGET_TPS: '1000',
         DEMO_PHASE: '1',
         CLOUDWATCH_NAMESPACE: `KinesisOnDemandDemo/${environment}`,
         ENVIRONMENT: environment,
@@ -541,10 +549,10 @@ def lambda_handler(event, context):
         operation: 'initialize_demo',
         demo_config: {
           phases: [
-            { phase_number: 1, target_tps: 10000, duration_seconds: 600 },
-            { phase_number: 2, target_tps: 100000, duration_seconds: 1200 },
-            { phase_number: 3, target_tps: 500000, duration_seconds: 1200 },
-            { phase_number: 4, target_tps: 10000, duration_seconds: 600 },
+            { phase_number: 1, target_tps: 1000, duration_seconds: 300 },
+            { phase_number: 2, target_tps: 10000, duration_seconds: 300 },
+            { phase_number: 3, target_tps: 50000, duration_seconds: 300 },
+            { phase_number: 4, target_tps: 1000, duration_seconds: 300 },
           ],
         },
       }),
@@ -557,7 +565,7 @@ def lambda_handler(event, context):
       payload: stepfunctions.TaskInput.fromObject({
         operation: 'start_phase',
         phase_number: 1,
-        target_tps: 10000,
+        target_tps: 1000,
         'demo_state.$': '$.demo_state.Payload.demo_state',
       }),
       resultPath: '$.phase1_result',
@@ -565,7 +573,7 @@ def lambda_handler(event, context):
     });
 
     const waitPhase1 = new stepfunctions.Wait(this, 'WaitPhase1Duration', {
-      time: stepfunctions.WaitTime.duration(cdk.Duration.seconds(600)),
+      time: stepfunctions.WaitTime.duration(cdk.Duration.seconds(300)),
     });
 
     const startPhase2 = new sfnTasks.LambdaInvoke(this, 'StartPhase2', {
@@ -573,7 +581,7 @@ def lambda_handler(event, context):
       payload: stepfunctions.TaskInput.fromObject({
         operation: 'start_phase',
         phase_number: 2,
-        target_tps: 100000,
+        target_tps: 10000,
         'demo_state.$': '$.phase1_result.Payload.demo_state',
       }),
       resultPath: '$.phase2_result',
@@ -581,7 +589,7 @@ def lambda_handler(event, context):
     });
 
     const waitPhase2 = new stepfunctions.Wait(this, 'WaitPhase2Duration', {
-      time: stepfunctions.WaitTime.duration(cdk.Duration.seconds(1200)),
+      time: stepfunctions.WaitTime.duration(cdk.Duration.seconds(300)),
     });
 
     const startPhase3 = new sfnTasks.LambdaInvoke(this, 'StartPhase3', {
@@ -589,7 +597,7 @@ def lambda_handler(event, context):
       payload: stepfunctions.TaskInput.fromObject({
         operation: 'start_phase',
         phase_number: 3,
-        target_tps: 500000,
+        target_tps: 50000,
         'demo_state.$': '$.phase2_result.Payload.demo_state',
       }),
       resultPath: '$.phase3_result',
@@ -597,7 +605,7 @@ def lambda_handler(event, context):
     });
 
     const waitPhase3 = new stepfunctions.Wait(this, 'WaitPhase3Duration', {
-      time: stepfunctions.WaitTime.duration(cdk.Duration.seconds(1200)),
+      time: stepfunctions.WaitTime.duration(cdk.Duration.seconds(300)),
     });
 
     const startPhase4 = new sfnTasks.LambdaInvoke(this, 'StartPhase4', {
@@ -605,7 +613,7 @@ def lambda_handler(event, context):
       payload: stepfunctions.TaskInput.fromObject({
         operation: 'start_phase',
         phase_number: 4,
-        target_tps: 10000,
+        target_tps: 1000,
         'demo_state.$': '$.phase3_result.Payload.demo_state',
       }),
       resultPath: '$.phase4_result',
@@ -613,7 +621,7 @@ def lambda_handler(event, context):
     });
 
     const waitPhase4 = new stepfunctions.Wait(this, 'WaitPhase4Duration', {
-      time: stepfunctions.WaitTime.duration(cdk.Duration.seconds(600)),
+      time: stepfunctions.WaitTime.duration(cdk.Duration.seconds(300)),
     });
 
     const cleanupDemo = new sfnTasks.LambdaInvoke(this, 'CleanupDemo', {
@@ -655,7 +663,7 @@ def lambda_handler(event, context):
     const stateMachine = new stepfunctions.StateMachine(this, 'DemoStateMachine', {
       stateMachineName: `kinesis-demo-${environment}`,
       definitionBody: stepfunctions.DefinitionBody.fromChainable(definition),
-      timeout: cdk.Duration.minutes(90),
+      timeout: cdk.Duration.minutes(30),
       tracingEnabled: true, // Enable X-Ray tracing
       logs: {
         destination: stepFunctionsLogGroup,
@@ -712,6 +720,239 @@ def lambda_handler(event, context):
     });
 
     return { controllerFunction, stateMachine };
+  }
+
+  private createSentimentAnalysisConsumer(environment: string): lambda.Function {
+    // Create Lambda Layer for dependencies (boto3, orjson)
+    const dependenciesLayer = new lambda.LayerVersion(this, 'SentimentConsumerDependenciesLayer', {
+      layerVersionName: `sentiment-consumer-dependencies-${environment}`,
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../lambda/sentiment-consumer/layer'), {
+        bundling: {
+          image: lambda.Runtime.PYTHON_3_12.bundlingImage,
+          command: [
+            'bash', '-c',
+            'pip install -r requirements.txt -t /asset-output/python && ' +
+            'rm -rf /asset-output/python/*.dist-info /asset-output/python/__pycache__'
+          ],
+        },
+      }),
+      compatibleRuntimes: [lambda.Runtime.PYTHON_3_12],
+      description: 'Dependencies for Sentiment Analysis Consumer (boto3, orjson)',
+    });
+
+    // Create Lambda execution role with required permissions
+    const sentimentConsumerRole = new iam.Role(this, 'SentimentConsumerRole', {
+      roleName: `KinesisDemo-SentimentConsumerRole-${environment}`,
+      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+      managedPolicies: [
+        iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+      ],
+      inlinePolicies: {
+        KinesisStreamAccess: new iam.PolicyDocument({
+          statements: [
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: [
+                'kinesis:GetRecords',
+                'kinesis:GetShardIterator',
+                'kinesis:DescribeStream',
+                'kinesis:DescribeStreamSummary',
+                'kinesis:ListShards',
+              ],
+              resources: [
+                `arn:aws:kinesis:${this.region}:${this.account}:stream/social-media-stream-${environment}`
+              ],
+            }),
+          ],
+        }),
+        BedrockAccess: new iam.PolicyDocument({
+          statements: [
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: [
+                'bedrock:InvokeModel',
+              ],
+              resources: [
+                // Allow inference profile to route to any of the three US regions
+                'arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-lite-v1:0',
+                'arn:aws:bedrock:us-west-2::foundation-model/amazon.nova-lite-v1:0',
+                'arn:aws:bedrock:us-east-2::foundation-model/amazon.nova-lite-v1:0',
+                // Also allow inference profiles in all three regions
+                'arn:aws:bedrock:us-east-1:*:inference-profile/*',
+                'arn:aws:bedrock:us-west-2:*:inference-profile/*',
+                'arn:aws:bedrock:us-east-2:*:inference-profile/*'
+              ],
+            }),
+          ],
+        }),
+        CloudWatchLogsAccess: new iam.PolicyDocument({
+          statements: [
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: [
+                'logs:CreateLogStream',
+                'logs:PutLogEvents',
+              ],
+              resources: [
+                `arn:aws:logs:${this.region}:${this.account}:log-group:/aws/lambda/sentiment-analysis-consumer-${environment}:*`,
+                `arn:aws:logs:${this.region}:${this.account}:log-group:/aws/lambda/sentiment-analysis-consumer-${environment}/insights:*`
+              ],
+            }),
+          ],
+        }),
+        CloudWatchMetrics: new iam.PolicyDocument({
+          statements: [
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: ['cloudwatch:PutMetricData'],
+              resources: ['*'],
+              conditions: {
+                StringLike: {
+                  'cloudwatch:namespace': ['SentimentAnalysis/*'],
+                },
+              },
+            }),
+          ],
+        }),
+      },
+    });
+
+    // Add CDK-nag suppression for Bedrock inference profile wildcard
+    NagSuppressions.addResourceSuppressions(
+      sentimentConsumerRole,
+      [
+        {
+          id: 'AwsSolutions-IAM5',
+          reason: 'Bedrock inference profiles require wildcard in account ID portion of ARN. This is scoped to inference-profile resource type in the deployment region only.',
+          appliesTo: [`Resource::arn:aws:bedrock:${this.region}:*:inference-profile/*`],
+        },
+      ],
+      true // applyToChildren
+    );
+
+    // Create Lambda function with inline code deployment
+    // CDK will automatically bundle the Lambda code and shared utilities
+    const sentimentConsumerFunction = new lambda.Function(this, 'SentimentConsumerFunction', {
+      functionName: `sentiment-analysis-consumer-${environment}`,
+      runtime: lambda.Runtime.PYTHON_3_12,
+      handler: 'lambda_handler.handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../'), {
+        bundling: {
+          image: lambda.Runtime.PYTHON_3_12.bundlingImage,
+          command: [
+            'bash', '-c',
+            // Copy all Lambda function code
+            // Note: Lambda has its own models.py and serialization.py for Lambda-specific types
+            'mkdir -p /asset-output && ' +
+            'cp -r /asset-input/lambda/sentiment-consumer/*.py /asset-output/ && ' +
+            'cp -r /asset-input/lambda/sentiment-consumer/extractors /asset-output/ && ' +
+            // Copy shared utilities from project root to shared directory
+            // These are for SocialMediaPost and related types
+            'mkdir -p /asset-output/shared && ' +
+            'cp /asset-input/shared/models.py /asset-output/shared/ && ' +
+            'cp /asset-input/shared/serialization.py /asset-output/shared/ && ' +
+            // Create a minimal __init__.py for shared module (without config import)
+            'echo "# Shared utilities for Lambda" > /asset-output/shared/__init__.py && ' +
+            'echo "from .models import SocialMediaPost, KinesisRecord, DemoMetrics, GeoLocation, PostType" >> /asset-output/shared/__init__.py && ' +
+            'echo "from .serialization import serialize_to_json, deserialize_from_json, post_from_bytes" >> /asset-output/shared/__init__.py && ' +
+            // Clean up unnecessary files
+            'rm -rf /asset-output/layer /asset-output/build /asset-output/dist /asset-output/__pycache__ /asset-output/*/__pycache__ && ' +
+            'rm -f /asset-output/package.sh /asset-output/requirements.txt /asset-output/.gitignore /asset-output/*.md /asset-output/*.zip && ' +
+            // List contents for verification
+            'echo "=== Lambda package structure ===" && ' +
+            'ls -la /asset-output/ | head -20'
+          ],
+        },
+        exclude: [
+          'infrastructure/**',
+          '.git/**',
+          'lambda/sentiment-consumer/layer/**',
+          'lambda/sentiment-consumer/build/**',
+          'lambda/sentiment-consumer/dist/**',
+          '__pycache__/**',
+          '**/__pycache__/**',
+          '*.pyc',
+          'package.sh',
+          '.gitignore',
+          '*.md',
+          '*.zip',
+        ],
+      }),
+      layers: [dependenciesLayer],
+      timeout: cdk.Duration.minutes(10), // Increased for larger batches (10K records)
+      memorySize: 2048, // Increased memory for processing 10K records per batch
+      // Set reserved concurrency to limit max concurrent executions
+      // This prevents the function from consuming all account concurrency
+      reservedConcurrentExecutions: 50, // Adjust based on your needs
+      environment: {
+        // Use inference profile ID - it will route to us-east-1, us-west-2, or us-east-2
+        BEDROCK_MODEL_ID: 'us.amazon.nova-lite-v1:0',
+        BEDROCK_REGION: this.region,
+        LOG_GROUP_NAME: `/aws/lambda/sentiment-analysis-consumer-${environment}`,
+        INSIGHTS_LOG_GROUP_NAME: `/aws/lambda/sentiment-analysis-consumer-${environment}/insights`,
+        ENVIRONMENT: environment,
+      },
+      role: sentimentConsumerRole,
+      description: 'Sentiment Analysis Consumer - Processes social media posts from Kinesis using Bedrock Nova Micro',
+    });
+
+    // Configure Event Source Mapping
+    // Strategy: Lambda randomly samples 20 posts from each batch for Bedrock analysis
+    // This ensures consistent, reliable Bedrock performance regardless of scale
+    // High batch size (500) maintains throughput as KDS scales to more shards
+    // Lambda always samples exactly 20 posts for Bedrock, ensuring consistent latency (~1-2s)
+    // At 190K records/min peak with 100 shards: 190K ÷ 500 = 380 invocations/min ÷ 100 shards = 3.8 inv/min per shard
+    // Total Bedrock calls: ~6-8 per minute (well under 200 req/min quota)
+    sentimentConsumerFunction.addEventSourceMapping('KinesisEventSource', {
+      eventSourceArn: `arn:aws:kinesis:${this.region}:${this.account}:stream/social-media-stream-${environment}`,
+      batchSize: 500, // High batch size for throughput; Lambda samples 20 for Bedrock
+      maxBatchingWindow: cdk.Duration.seconds(5), // Shorter window for faster processing
+      startingPosition: lambda.StartingPosition.LATEST,
+      reportBatchItemFailures: true,
+      parallelizationFactor: 1, // Keep at 1 to minimize concurrent invocations per shard
+    });
+
+    // Create CloudWatch Log Groups
+    this.createSentimentAnalysisLogGroups(environment);
+
+    // Add resource tags
+    cdk.Tags.of(sentimentConsumerFunction).add('Environment', environment);
+    cdk.Tags.of(sentimentConsumerFunction).add('Component', 'SentimentAnalysisConsumer');
+    cdk.Tags.of(sentimentConsumerFunction).add('CostCenter', 'KinesisOnDemandDemo');
+    cdk.Tags.of(dependenciesLayer).add('Environment', environment);
+    cdk.Tags.of(dependenciesLayer).add('Component', 'SentimentAnalysisConsumer');
+
+    return sentimentConsumerFunction;
+  }
+
+  private createSentimentAnalysisLogGroups(environment: string) {
+    // Main Lambda log group
+    new logs.LogGroup(this, 'SentimentConsumerLogGroup', {
+      logGroupName: `/aws/lambda/sentiment-analysis-consumer-${environment}`,
+      retention: logs.RetentionDays.ONE_WEEK,
+    });
+
+    // Insight log streams
+    const insightLogGroup = new logs.LogGroup(this, 'SentimentInsightsLogGroup', {
+      logGroupName: `/aws/lambda/sentiment-analysis-consumer-${environment}/insights`,
+      retention: logs.RetentionDays.ONE_WEEK,
+    });
+
+    // Create log streams
+    const logStreams = [
+      'product-sentiment',
+      'trending-topics',
+      'engagement-sentiment',
+      'geographic-sentiment',
+      'viral-events',
+    ];
+
+    logStreams.forEach(streamName => {
+      new logs.LogStream(this, `${streamName}LogStream`, {
+        logGroup: insightLogGroup,
+        logStreamName: streamName,
+      });
+    });
   }
 
 
@@ -940,12 +1181,313 @@ def lambda_handler(event, context):
             setPeriodToTimeRange: false,
             sparkline: false
           }
+        },
+        {
+            type: "metric",
+            x: 12,
+            y: 12,
+            width: 12,
+            height: 6,
+            properties: {
+                metrics: [
+                    [ "AWS/Bedrock", "Invocations", "ModelId", "us.amazon.nova-lite-v1:0", { "id": "m1" } ],
+                    [ ".", "InvocationThrottles", ".", ".", { "id": "m2" } ]
+                ],
+                view: "timeSeries",
+                stacked: false,
+                region: this.region,
+                stat: "Sum",
+                period: 60,
+                title: "Bedrock API Invocation"
+            }
         }
       ]
     };
     
     // Create the dashboard using the CfnDashboard construct for direct JSON support
     const dashboard = new cloudwatch.CfnDashboard(this, 'DemoDashboard', {
+      dashboardName: dashboardName,
+      dashboardBody: JSON.stringify(dashboardBody),
+    });
+
+    return dashboard;
+  }
+
+  private createSentimentAnalysisDashboard(environment: string): cloudwatch.CfnDashboard {
+    const dashboardName = `sentiment-analysis-${environment}`;
+    
+    const dashboardBody = {
+      widgets: [
+        {
+          type: "metric",
+          x: 0,
+          y: 0,
+          width: 12,
+          height: 6,
+          properties: {
+            metrics: [
+              [ "SentimentAnalysis/Insights", "PositivePosts", "Environment", environment, "DemoPhase", "0", { stat: "Sum", color: "#2ca02c" } ],
+              [ "...", "NegativePosts", ".", ".", ".", ".", { stat: "Sum", color: "#d62728" } ],
+              [ "...", "NeutralPosts", ".", ".", ".", ".", { stat: "Sum", color: "#7f7f7f" } ]
+            ],
+            view: "timeSeries",
+            stacked: true,
+            region: this.region,
+            title: "Sentiment Distribution Over Time",
+            period: 60,
+            yAxis: {
+              left: {
+                label: "Post Count"
+              }
+            }
+          }
+        },
+        {
+          type: "metric",
+          x: 12,
+          y: 0,
+          width: 6,
+          height: 6,
+          properties: {
+            metrics: [
+              [ "SentimentAnalysis/Insights", "PositivePosts", "Environment", environment, "DemoPhase", "0", { stat: "Sum", label: "Positive" } ],
+              [ "...", "NegativePosts", ".", ".", ".", ".", { stat: "Sum", label: "Negative" } ],
+              [ "...", "NeutralPosts", ".", ".", ".", ".", { stat: "Sum", label: "Neutral" } ]
+            ],
+            view: "pie",
+            region: this.region,
+            title: "Overall Sentiment Distribution",
+            period: 3600,
+            setPeriodToTimeRange: true
+          }
+        },
+        {
+          type: "metric",
+          x: 18,
+          y: 0,
+          width: 6,
+          height: 6,
+          properties: {
+            metrics: [
+              [ "SentimentAnalysis/Insights", "AverageSentimentScore", "Environment", environment, "DemoPhase", "0", { stat: "Average" } ]
+            ],
+            view: "singleValue",
+            region: this.region,
+            title: "Average Sentiment Score",
+            period: 60,
+            setPeriodToTimeRange: false
+          }
+        },
+        {
+          type: "metric",
+          x: 0,
+          y: 6,
+          width: 12,
+          height: 6,
+          properties: {
+            metrics: [
+              [ "SentimentAnalysis/Insights", "AverageSentimentScore", "Environment", environment, "DemoPhase", "0", { stat: "Average" } ]
+            ],
+            view: "timeSeries",
+            region: this.region,
+            title: "Sentiment Score Trend",
+            period: 60,
+            yAxis: {
+              left: {
+                min: -1,
+                max: 1,
+                label: "Sentiment Score"
+              }
+            },
+            annotations: {
+              horizontal: [
+                {
+                  value: 0,
+                  label: "Neutral",
+                  fill: "above"
+                }
+              ]
+            }
+          }
+        },
+        {
+          type: "metric",
+          x: 12,
+          y: 6,
+          width: 12,
+          height: 6,
+          properties: {
+            metrics: [
+              [ "SentimentAnalysis/Insights", "TrendingTopicsCount", "Environment", environment, "DemoPhase", "0", { stat: "Sum" } ]
+            ],
+            view: "timeSeries",
+            region: this.region,
+            title: "Trending Topics Count",
+            period: 60,
+            yAxis: {
+              left: {
+                label: "Count"
+              }
+            }
+          }
+        },
+        {
+          type: "metric",
+          x: 0,
+          y: 12,
+          width: 12,
+          height: 6,
+          properties: {
+            metrics: [
+              [ "SentimentAnalysis/Insights", "EngagementSentimentCorrelation", "Environment", environment, "DemoPhase", "0", { stat: "Average" } ]
+            ],
+            view: "timeSeries",
+            region: this.region,
+            title: "Engagement-Sentiment Correlation",
+            period: 60,
+            yAxis: {
+              left: {
+                min: -1,
+                max: 1,
+                label: "Correlation"
+              }
+            }
+          }
+        },
+        {
+          type: "metric",
+          x: 12,
+          y: 12,
+          width: 12,
+          height: 6,
+          properties: {
+            metrics: [
+              [ "SentimentAnalysis/Insights", "ControversialPosts", "Environment", environment, "DemoPhase", "0", { stat: "Sum" } ]
+            ],
+            view: "timeSeries",
+            region: this.region,
+            title: "Controversial Posts (High Engagement, Negative Sentiment)",
+            period: 60,
+            yAxis: {
+              left: {
+                label: "Count"
+              }
+            }
+          }
+        },
+        {
+          type: "metric",
+          x: 0,
+          y: 18,
+          width: 24,
+          height: 6,
+          properties: {
+            metrics: [
+              [ { expression: "SEARCH('{SentimentAnalysis/Insights,Product} MetricName=\"ProductSentiment\"', 'Average', 300)", id: "e1" } ]
+            ],
+            view: "timeSeries",
+            region: this.region,
+            title: "Product Sentiment Scores",
+            period: 60,
+            yAxis: {
+              left: {
+                min: -1,
+                max: 1,
+                label: "Sentiment"
+              }
+            }
+          }
+        },
+        {
+          type: "metric",
+          x: 0,
+          y: 24,
+          width: 24,
+          height: 6,
+          properties: {
+            metrics: [
+              [ { expression: "SEARCH('{SentimentAnalysis/Insights,Hashtag} MetricName=\"HashtagPostCount\"', 'Sum', 300)", id: "e1" } ]
+            ],
+            view: "timeSeries",
+            region: this.region,
+            title: "Hashtag Post Counts",
+            period: 60,
+            yAxis: {
+              left: {
+                label: "Post Count"
+              }
+            }
+          }
+        },
+        {
+          type: "metric",
+          x: 0,
+          y: 30,
+          width: 24,
+          height: 6,
+          properties: {
+            metrics: [
+              [ { expression: "SEARCH('{SentimentAnalysis/Insights,City,Country} MetricName=\"GeographicSentiment\"', 'Average', 300)", id: "e1" } ]
+            ],
+            view: "timeSeries",
+            region: this.region,
+            title: "Geographic Sentiment by Location",
+            period: 60,
+            yAxis: {
+              left: {
+                min: -1,
+                max: 1,
+                label: "Sentiment"
+              }
+            }
+          }
+        },
+        {
+          type: "metric",
+          x: 0,
+          y: 36,
+          width: 12,
+          height: 6,
+          properties: {
+            metrics: [
+              [ "AWS/Lambda", "Invocations", { stat: "Sum", label: "Lambda Invocations" } ],
+              [ ".", "Errors", { stat: "Sum", label: "Errors", color: "#d62728" } ]
+            ],
+            view: "timeSeries",
+            region: this.region,
+            title: "Lambda Performance",
+            period: 60
+          }
+        },
+        {
+          type: "metric",
+          x: 12,
+          y: 36,
+          width: 12,
+          height: 6,
+          properties: {
+            metrics: [
+              [ "SentimentAnalysis/Consumer", "ErrorRate", { stat: "Average" } ],
+              [ ".", "ProcessingLatency", { stat: "Average", yAxis: "right" } ]
+            ],
+            view: "timeSeries",
+            region: this.region,
+            title: "Processing Metrics",
+            period: 60,
+            yAxis: {
+              left: {
+                label: "Error Rate (%)"
+              },
+              right: {
+                label: "Latency (ms)"
+              }
+            }
+          }
+        }
+      ]
+    };
+    
+    const dashboard = new cloudwatch.CfnDashboard(this, 'SentimentDashboard', {
       dashboardName: dashboardName,
       dashboardBody: JSON.stringify(dashboardBody),
     });
@@ -975,10 +1517,10 @@ def lambda_handler(event, context):
     // Step Functions log group (created in Step Functions resources)
   }
 
-  private createOutputs(environment: string) {
+  private createOutputs(environment: string, sentimentConsumerFunction?: lambda.Function) {
     new cdk.CfnOutput(this, 'KinesisStreamName', {
-      value: `social-media-stream-${environment}`,
-      description: 'Name of the Kinesis Data Stream (created by demo-manager.sh)',
+      value: this.kinesisStream.streamName,
+      description: 'Name of the Kinesis Data Stream',
       exportName: `${this.stackName}-KinesisStreamName`,
     });
 
@@ -1000,12 +1542,37 @@ def lambda_handler(event, context):
       exportName: `${this.stackName}-StateMachineArn`,
     });
 
+    // Sentiment Analysis Consumer outputs
+    if (sentimentConsumerFunction) {
+      new cdk.CfnOutput(this, 'SentimentConsumerFunctionArn', {
+        value: sentimentConsumerFunction.functionArn,
+        description: 'ARN of the Sentiment Analysis Consumer Lambda function',
+        exportName: `${this.stackName}-SentimentConsumerFunctionArn`,
+      });
 
+      new cdk.CfnOutput(this, 'SentimentConsumerLogGroupName', {
+        value: `/aws/lambda/sentiment-analysis-consumer-${environment}`,
+        description: 'CloudWatch Log Group for Sentiment Analysis Consumer',
+        exportName: `${this.stackName}-SentimentConsumerLogGroupName`,
+      });
+
+      new cdk.CfnOutput(this, 'SentimentInsightsLogGroupName', {
+        value: `/aws/lambda/sentiment-analysis-consumer-${environment}/insights`,
+        description: 'CloudWatch Log Group for Sentiment Insights',
+        exportName: `${this.stackName}-SentimentInsightsLogGroupName`,
+      });
+    }
 
     new cdk.CfnOutput(this, 'DashboardUrl', {
       value: `https://${this.region}.console.aws.amazon.com/cloudwatch/home?region=${this.region}#dashboards:name=${this.dashboard.dashboardName}`,
       description: 'CloudWatch Dashboard URL',
       exportName: `${this.stackName}-DashboardUrl`,
+    });
+    
+    new cdk.CfnOutput(this, 'SentimentDashboardUrl', {
+      value: `https://${this.region}.console.aws.amazon.com/cloudwatch/home?region=${this.region}#dashboards:name=${this.sentimentDashboard.dashboardName}`,
+      description: 'Sentiment Analysis Dashboard URL',
+      exportName: `${this.stackName}-SentimentDashboardUrl`,
     });
 
     new cdk.CfnOutput(this, 'StepFunctionsConsoleUrl', {

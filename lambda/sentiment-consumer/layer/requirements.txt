@@ -1,0 +1,9 @@
+# Lambda Layer Dependencies for Sentiment Analysis Consumer
+# These dependencies will be packaged as a Lambda Layer
+
+# AWS SDK for Python - Required for Bedrock, CloudWatch, and Kinesis interactions
+boto3==1.34.144
+botocore==1.34.144
+
+# Fast JSON parsing library - Significantly faster than standard json module
+orjson==3.10.5
