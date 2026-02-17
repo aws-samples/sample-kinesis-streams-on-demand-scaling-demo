@@ -178,12 +178,14 @@ kinesis-ondemand-demo/
 - Docker and Docker Compose installed
 - **Non-production AWS account** with appropriate permissions
 - AWS credentials configured
+- Latest version of AWS CLI >= 2.31.x
 - Understanding that this demo will generate AWS charges
 
 ### 1. Configure AWS Credentials
 
 ```bash
 # Quick credential check (recommended)
+export AWS_REGION=<AWS REGION CODE>
 ./check-credentials.sh
 
 # Or manually verify credentials are available
