@@ -6,4 +6,4 @@ boto3==1.34.144
 botocore==1.34.144
 
 # Fast JSON parsing library - Significantly faster than standard json module
-orjson==3.10.5
+orjson==3.11.6
